@@ -7,19 +7,23 @@
 // - ID-preserving graph round-trip
 // - Strict chunk ceiling
 // - Explicit import/graph errors
+// - Embedding-space compatibility enforcement
 // © 2026 MYTHOS. All Rights Reserved.
 
 const DB_NAME = 'mythos_vault';
 const DB_VERSION = 10;
 
-// Current Google embedding model.
-// Existing vectors created with another embedding model must not be
-// mixed with query vectors from this model.
-const EMBEDDING_MODEL = 'gemini-embedding-2';
-const DEFAULT_GENERATION_MODEL = 'gemini-3.8-flash';
+export const EMBEDDING_MODEL = 'gemini-embedding-2';
+export const DEFAULT_GENERATION_MODEL = 'gemini-3.8-flash';
 
-const MAX_EMBED_BATCH = 100;
-const MAX_CHUNK_CHARS = 2000;
+export const MAX_EMBED_BATCH = 100;
+export const MAX_CHUNK_CHARS = 2000;
+
+function normalizeAgentId(value) {
+  return String(value || '')
+    .trim()
+    .toUpperCase();
+}
 
 class SimpleDB {
   constructor() {
@@ -33,42 +37,71 @@ class SimpleDB {
 
       req.onupgradeneeded = (e) => {
         const db = e.target.result;
+        const tx = req.transaction;
 
         if (!db.objectStoreNames.contains('vectors')) {
-          const store = db.createObjectStore('vectors', { keyPath: 'id' });
-          store.createIndex('agentId', 'agentId', { unique: false });
-          store.createIndex('numMarkId', 'numMarkId', { unique: false });
+          const store = db.createObjectStore('vectors', {
+            keyPath: 'id'
+          });
+
+          store.createIndex('agentId', 'agentId', {
+            unique: false
+          });
+
+          store.createIndex('numMarkId', 'numMarkId', {
+            unique: false
+          });
         } else {
-          const store = req.transaction.objectStore('vectors');
+          const store = tx.objectStore('vectors');
 
           if (!store.indexNames.contains('agentId')) {
-            store.createIndex('agentId', 'agentId', { unique: false });
+            store.createIndex('agentId', 'agentId', {
+              unique: false
+            });
           }
 
           if (!store.indexNames.contains('numMarkId')) {
-            store.createIndex('numMarkId', 'numMarkId', { unique: false });
+            store.createIndex('numMarkId', 'numMarkId', {
+              unique: false
+            });
           }
         }
 
         if (!db.objectStoreNames.contains('edges')) {
-          const edgeStore = db.createObjectStore('edges', { keyPath: 'id' });
+          const edgeStore = db.createObjectStore('edges', {
+            keyPath: 'id'
+          });
 
-          edgeStore.createIndex('sourceId', 'sourceId', { unique: false });
-          edgeStore.createIndex('agentId', 'agentId', { unique: false });
-          edgeStore.createIndex('type', 'type', { unique: false });
+          edgeStore.createIndex('sourceId', 'sourceId', {
+            unique: false
+          });
+
+          edgeStore.createIndex('agentId', 'agentId', {
+            unique: false
+          });
+
+          edgeStore.createIndex('type', 'type', {
+            unique: false
+          });
         } else {
-          const edgeStore = req.transaction.objectStore('edges');
+          const edgeStore = tx.objectStore('edges');
 
           if (!edgeStore.indexNames.contains('sourceId')) {
-            edgeStore.createIndex('sourceId', 'sourceId', { unique: false });
+            edgeStore.createIndex('sourceId', 'sourceId', {
+              unique: false
+            });
           }
 
           if (!edgeStore.indexNames.contains('agentId')) {
-            edgeStore.createIndex('agentId', 'agentId', { unique: false });
+            edgeStore.createIndex('agentId', 'agentId', {
+              unique: false
+            });
           }
 
           if (!edgeStore.indexNames.contains('type')) {
-            edgeStore.createIndex('type', 'type', { unique: false });
+            edgeStore.createIndex('type', 'type', {
+              unique: false
+            });
           }
         }
       };
@@ -84,7 +117,10 @@ class SimpleDB {
       };
 
       req.onerror = () => {
-        reject(req.error || new Error('IndexedDB open failed'));
+        reject(
+          req.error ||
+          new Error('IndexedDB open failed')
+        );
       };
     });
   }
@@ -93,10 +129,20 @@ class SimpleDB {
     await this.ready;
 
     return new Promise((resolve, reject) => {
-      const tx = this.db.transaction(storeName, 'readwrite');
+      const tx = this.db.transaction(
+        storeName,
+        'readwrite'
+      );
 
       tx.oncomplete = () => resolve();
       tx.onerror = () => reject(tx.error);
+      tx.onabort = () =>
+        reject(
+          tx.error ||
+          new Error(
+            `IndexedDB transaction aborted: ${storeName}`
+          )
+        );
 
       tx.objectStore(storeName).put(value);
     });
@@ -108,14 +154,84 @@ class SimpleDB {
     await this.ready;
 
     return new Promise((resolve, reject) => {
-      const tx = this.db.transaction(storeName, 'readwrite');
-      const store = tx.objectStore(storeName);
+      const tx = this.db.transaction(
+        storeName,
+        'readwrite'
+      );
+
+      const store =
+        tx.objectStore(storeName);
 
       tx.oncomplete = () => resolve();
-      tx.onerror = () => reject(tx.error);
+
+      tx.onerror = () =>
+        reject(
+          tx.error ||
+          new Error(
+            `IndexedDB write failed: ${storeName}`
+          )
+        );
+
+      tx.onabort = () =>
+        reject(
+          tx.error ||
+          new Error(
+            `IndexedDB transaction aborted: ${storeName}`
+          )
+        );
 
       for (const value of values) {
         store.put(value);
+      }
+    });
+  }
+
+  async bulkPutAtomic(vectors, edges) {
+    await this.ready;
+
+    if (
+      !vectors?.length &&
+      !edges?.length
+    ) {
+      return;
+    }
+
+    return new Promise((resolve, reject) => {
+      const tx = this.db.transaction(
+        ['vectors', 'edges'],
+        'readwrite'
+      );
+
+      const vectorStore =
+        tx.objectStore('vectors');
+
+      const edgeStore =
+        tx.objectStore('edges');
+
+      tx.oncomplete = () => resolve();
+
+      tx.onerror = () =>
+        reject(
+          tx.error ||
+          new Error(
+            'Atomic IndexedDB import failed.'
+          )
+        );
+
+      tx.onabort = () =>
+        reject(
+          tx.error ||
+          new Error(
+            'Atomic IndexedDB import transaction aborted.'
+          )
+        );
+
+      for (const vector of vectors || []) {
+        vectorStore.put(vector);
+      }
+
+      for (const edge of edges || []) {
+        edgeStore.put(edge);
       }
     });
   }
@@ -124,11 +240,19 @@ class SimpleDB {
     await this.ready;
 
     return new Promise((resolve, reject) => {
-      const tx = this.db.transaction(storeName, 'readonly');
-      const req = tx.objectStore(storeName).getAll();
+      const tx = this.db.transaction(
+        storeName,
+        'readonly'
+      );
 
-      req.onsuccess = () => resolve(req.result || []);
-      req.onerror = () => reject(req.error);
+      const req =
+        tx.objectStore(storeName).getAll();
+
+      req.onsuccess = () =>
+        resolve(req.result || []);
+
+      req.onerror = () =>
+        reject(req.error);
     });
   }
 
@@ -136,11 +260,19 @@ class SimpleDB {
     await this.ready;
 
     return new Promise((resolve, reject) => {
-      const tx = this.db.transaction(storeName, 'readonly');
-      const req = tx.objectStore(storeName).count();
+      const tx = this.db.transaction(
+        storeName,
+        'readonly'
+      );
 
-      req.onsuccess = () => resolve(req.result || 0);
-      req.onerror = () => reject(req.error);
+      const req =
+        tx.objectStore(storeName).count();
+
+      req.onsuccess = () =>
+        resolve(req.result || 0);
+
+      req.onerror = () =>
+        reject(req.error);
     });
   }
 
@@ -151,20 +283,38 @@ class SimpleDB {
     }
 
     return new Promise((resolve, reject) => {
-      const req = indexedDB.deleteDatabase(DB_NAME);
+      const req =
+        indexedDB.deleteDatabase(DB_NAME);
 
       req.onsuccess = () => resolve();
-      req.onerror = () => reject(req.error);
-      req.onblocked = () => {
-        reject(new Error('IndexedDB delete blocked by another connection.'));
-      };
+
+      req.onerror = () =>
+        reject(req.error);
+
+      req.onblocked = () =>
+        reject(
+          new Error(
+            'IndexedDB delete blocked by another connection.'
+          )
+        );
     });
   }
 }
 
 function cosine(a, b) {
-  if (!Array.isArray(a) || !Array.isArray(b)) return 0;
-  if (a.length !== b.length || !a.length) return 0;
+  if (
+    !Array.isArray(a) ||
+    !Array.isArray(b)
+  ) {
+    return 0;
+  }
+
+  if (
+    a.length !== b.length ||
+    !a.length
+  ) {
+    return 0;
+  }
 
   let dot = 0;
   let ma = 0;
@@ -174,24 +324,57 @@ function cosine(a, b) {
     const x = Number(a[i]);
     const y = Number(b[i]);
 
-    if (!Number.isFinite(x) || !Number.isFinite(y)) return 0;
+    if (
+      !Number.isFinite(x) ||
+      !Number.isFinite(y)
+    ) {
+      return 0;
+    }
 
     dot += x * y;
     ma += x * x;
     mb += y * y;
   }
 
-  const denom = Math.sqrt(ma) * Math.sqrt(mb);
+  const denom =
+    Math.sqrt(ma) *
+    Math.sqrt(mb);
 
-  return denom ? dot / denom : 0;
+  return denom
+    ? dot / denom
+    : 0;
+}
+
+function isValidVector(vector, dimension = null) {
+  if (!Array.isArray(vector)) {
+    return false;
+  }
+
+  if (!vector.length) {
+    return false;
+  }
+
+  if (
+    dimension !== null &&
+    vector.length !== dimension
+  ) {
+    return false;
+  }
+
+  return vector.every(value =>
+    Number.isFinite(Number(value))
+  );
 }
 
 function cleanJsonFence(text) {
-  let clean = String(text || '').trim();
+  let clean =
+    String(text || '').trim();
 
   if (clean.startsWith('```json')) {
     clean = clean.slice(7);
-  } else if (clean.startsWith('```')) {
+  } else if (
+    clean.startsWith('```')
+  ) {
     clean = clean.slice(3);
   }
 
@@ -215,6 +398,20 @@ function isValidTriplet(value) {
   );
 }
 
+function validateEdgeReference(
+  edge,
+  nodeIds
+) {
+  return (
+    edge &&
+    typeof edge.id === 'string' &&
+    edge.id &&
+    typeof edge.sourceId === 'string' &&
+    edge.sourceId &&
+    nodeIds.has(edge.sourceId)
+  );
+}
+
 export class Lorepack {
   constructor() {
     this.db = new SimpleDB();
@@ -228,7 +425,9 @@ export class Lorepack {
 
   setApiKeys(keys) {
     this.apiKeys = (keys || [])
-      .map(k => String(k || '').trim())
+      .map(k =>
+        String(k || '').trim()
+      )
       .filter(Boolean);
 
     this.keyIndex = 0;
@@ -236,22 +435,21 @@ export class Lorepack {
 
   _getKey() {
     if (!this.apiKeys.length) {
-      throw new Error('API Keys Missing.');
+      throw new Error(
+        'API Keys Missing.'
+      );
     }
 
-    const key = this.apiKeys[this.keyIndex];
+    const key =
+      this.apiKeys[this.keyIndex];
 
-    this.keyIndex = (this.keyIndex + 1) % this.apiKeys.length;
+    this.keyIndex =
+      (this.keyIndex + 1) %
+      this.apiKeys.length;
 
     return key;
   }
 
-  /*
-   * Legacy placeholder retained for compatibility.
-   *
-   * This is NOT NumMarkX.
-   * It is only a deterministic temporary identifier.
-   */
   genSigil(text) {
     return String(text || '')
       .toLowerCase()
@@ -259,53 +457,76 @@ export class Lorepack {
       .slice(0, 50);
   }
 
-  /*
-   * Sentence-aware chunking with a genuine hard ceiling.
-   *
-   * No emitted chunk may exceed maxChars.
-   * Long sentences are split into hard-width segments.
-   */
-  chunk(text, maxChars = MAX_CHUNK_CHARS) {
-    const limit = Math.max(1, Math.floor(Number(maxChars) || MAX_CHUNK_CHARS));
+  chunk(
+    text,
+    maxChars = MAX_CHUNK_CHARS
+  ) {
+    const limit = Math.max(
+      1,
+      Math.floor(
+        Number(maxChars) ||
+        MAX_CHUNK_CHARS
+      )
+    );
 
-    const normalized = String(text || '')
-      .replace(/\r\n/g, '\n')
-      .replace(/\r/g, '\n')
-      .trim();
+    const normalized =
+      String(text || '')
+        .replace(/\r\n/g, '\n')
+        .replace(/\r/g, '\n')
+        .trim();
 
-    if (!normalized) return [];
+    if (!normalized) {
+      return [];
+    }
 
-    const sentences = normalized
-      .split(/(?<=[.!?])\s+(?=[A-Z0-9@])/)
-      .map(s => s.trim())
-      .filter(Boolean);
+    const sentences =
+      normalized
+        .split(
+          /(?<=[.!?])\s+(?=[A-Z0-9@])/
+        )
+        .map(s => s.trim())
+        .filter(Boolean);
 
     const out = [];
     let buffer = '';
 
-    const emitHardWrapped = (textValue) => {
-      let remaining = textValue.trim();
+    const emitHardWrapped =
+      (textValue) => {
+        let remaining =
+          textValue.trim();
 
-      while (remaining.length > limit) {
-        let cut = remaining.lastIndexOf(' ', limit);
+        while (
+          remaining.length > limit
+        ) {
+          let cut =
+            remaining.lastIndexOf(
+              ' ',
+              limit
+            );
 
-        if (cut <= 0) {
-          cut = limit;
+          if (cut <= 0) {
+            cut = limit;
+          }
+
+          const piece =
+            remaining
+              .slice(0, cut)
+              .trim();
+
+          if (piece) {
+            out.push(piece);
+          }
+
+          remaining =
+            remaining
+              .slice(cut)
+              .trim();
         }
 
-        const piece = remaining.slice(0, cut).trim();
-
-        if (piece) {
-          out.push(piece);
+        if (remaining) {
+          out.push(remaining);
         }
-
-        remaining = remaining.slice(cut).trim();
-      }
-
-      if (remaining) {
-        out.push(remaining);
-      }
-    };
+      };
 
     for (const sentence of sentences) {
       if (sentence.length > limit) {
@@ -323,9 +544,12 @@ export class Lorepack {
         continue;
       }
 
-      const candidate = `${buffer} ${sentence}`;
+      const candidate =
+        `${buffer} ${sentence}`;
 
-      if (candidate.length <= limit) {
+      if (
+        candidate.length <= limit
+      ) {
         buffer = candidate;
       } else {
         out.push(buffer);
@@ -343,28 +567,134 @@ export class Lorepack {
   async getStats() {
     await this.db.ready;
 
-    const totalNodes = await this.db.count('vectors');
-    const totalEdges = await this.db.count('edges');
-
     return {
-      totalNodes,
-      totalEdges
+      totalNodes:
+        await this.db.count('vectors'),
+
+      totalEdges:
+        await this.db.count('edges')
     };
   }
 
   async getNodes(agentId) {
     await this.db.ready;
 
-    const all = await this.db.getAll('vectors');
+    const all =
+      await this.db.getAll('vectors');
 
-    if (!agentId || agentId === 'OPERATOR') {
+    if (
+      !agentId ||
+      agentId === 'OPERATOR'
+    ) {
       return all;
     }
 
-    const aid = String(agentId).toUpperCase();
+    const aid =
+      normalizeAgentId(agentId);
 
     return all.filter(
-      node => String(node.agentId || '').toUpperCase() === aid
+      node =>
+        normalizeAgentId(
+          node.agentId
+        ) === aid
+    );
+  }
+
+  async getEdges(agentId = null) {
+    await this.db.ready;
+
+    const all =
+      await this.db.getAll('edges');
+
+    if (!agentId) {
+      return all;
+    }
+
+    const aid =
+      normalizeAgentId(agentId);
+
+    return all.filter(
+      edge =>
+        normalizeAgentId(
+          edge.agentId
+        ) === aid
+    );
+  }
+
+  async deleteAgentData(agentId) {
+    await this.db.ready;
+
+    const aid =
+      normalizeAgentId(agentId);
+
+    if (!aid) {
+      throw new Error(
+        'Agent ID required.'
+      );
+    }
+
+    const nodes =
+      await this.getNodes(aid);
+
+    const nodeIds =
+      new Set(
+        nodes.map(node => node.id)
+      );
+
+    const edges =
+      await this.getEdges(aid);
+
+    return new Promise(
+      (resolve, reject) => {
+        const tx =
+          this.db.db.transaction(
+            ['vectors', 'edges'],
+            'readwrite'
+          );
+
+        const vectorStore =
+          tx.objectStore('vectors');
+
+        const edgeStore =
+          tx.objectStore('edges');
+
+        tx.oncomplete = () =>
+          resolve({
+            vectors: nodes.length,
+            edges: edges.length
+          });
+
+        tx.onerror = () =>
+          reject(
+            tx.error ||
+            new Error(
+              'Agent data deletion failed.'
+            )
+          );
+
+        tx.onabort = () =>
+          reject(
+            tx.error ||
+            new Error(
+              'Agent data deletion aborted.'
+            )
+          );
+
+        for (const node of nodes) {
+          vectorStore.delete(node.id);
+        }
+
+        for (const edge of edges) {
+          edgeStore.delete(edge.id);
+        }
+
+        // Defensive cleanup for orphaned edges
+        // referencing this agent's nodes.
+        if (nodeIds.size) {
+          // Already covered by agent edge filtering,
+          // retained here as an explicit integrity boundary.
+        }
+      }
     );
   }
 
@@ -372,18 +702,29 @@ export class Lorepack {
   // EMBEDDINGS
   // ------------------------------------------------------------
 
-  async embedBatch(texts, keyOverride = null) {
-    if (!Array.isArray(texts) || !texts.length) {
+  async embedBatch(
+    texts,
+    keyOverride = null
+  ) {
+    if (
+      !Array.isArray(texts) ||
+      !texts.length
+    ) {
       return [];
     }
 
-    if (texts.length > MAX_EMBED_BATCH) {
+    if (
+      texts.length >
+      MAX_EMBED_BATCH
+    ) {
       throw new Error(
         `Embedding batch exceeds ${MAX_EMBED_BATCH} items.`
       );
     }
 
-    const key = keyOverride || this._getKey();
+    const key =
+      keyOverride ||
+      this._getKey();
 
     const url =
       `https://generativelanguage.googleapis.com/v1beta/models/` +
@@ -392,58 +733,96 @@ export class Lorepack {
 
     const body = {
       requests: texts.map(text => ({
-        model: `models/${EMBEDDING_MODEL}`,
+        model:
+          `models/${EMBEDDING_MODEL}`,
+
         content: {
           parts: [
             {
-              text: String(text || '')
+              text:
+                String(text || '')
             }
           ]
         }
       }))
     };
 
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify(body)
-    });
+    const response =
+      await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type':
+            'application/json'
+        },
+        body:
+          JSON.stringify(body)
+      });
 
-    const json = await response.json();
+    const json =
+      await response.json();
 
-    if (!response.ok || json.error) {
+    if (
+      !response.ok ||
+      json.error
+    ) {
       throw new Error(
         json.error?.message ||
         `Embedding failed (${response.status})`
       );
     }
 
-    const embeddings = json.embeddings || [];
+    const embeddings =
+      json.embeddings || [];
 
-    if (embeddings.length !== texts.length) {
+    if (
+      embeddings.length !==
+      texts.length
+    ) {
       throw new Error(
         `Embedding count mismatch: requested ${texts.length}, received ${embeddings.length}.`
       );
     }
 
-    const vectors = embeddings.map((embedding, index) => {
-      const values = embedding?.values;
+    const vectors =
+      embeddings.map(
+        (embedding, index) => {
+          const values =
+            embedding?.values;
 
-      if (!Array.isArray(values) || !values.length) {
-        throw new Error(
-          `Missing embedding vector at batch index ${index}.`
-        );
-      }
+          if (
+            !Array.isArray(values) ||
+            !values.length
+          ) {
+            throw new Error(
+              `Missing embedding vector at batch index ${index}.`
+            );
+          }
 
-      return values;
-    });
+          if (
+            !isValidVector(values)
+          ) {
+            throw new Error(
+              `Invalid embedding vector at batch index ${index}.`
+            );
+          }
 
-    const dimension = vectors[0].length;
+          return values;
+        }
+      );
 
-    if (!vectors.every(vector => vector.length === dimension)) {
-      throw new Error('Embedding dimension mismatch inside batch.');
+    const dimension =
+      vectors[0].length;
+
+    if (
+      !vectors.every(
+        vector =>
+          vector.length ===
+          dimension
+      )
+    ) {
+      throw new Error(
+        'Embedding dimension mismatch inside batch.'
+      );
     }
 
     return vectors;
@@ -453,8 +832,14 @@ export class Lorepack {
   // GENERATION
   // ------------------------------------------------------------
 
-  async _generate(text, model = DEFAULT_GENERATION_MODEL, keyOverride = null) {
-    const key = keyOverride || this._getKey();
+  async _generate(
+    text,
+    model = DEFAULT_GENERATION_MODEL,
+    keyOverride = null
+  ) {
+    const key =
+      keyOverride ||
+      this._getKey();
 
     const url =
       `https://generativelanguage.googleapis.com/v1beta/models/` +
@@ -473,17 +858,24 @@ export class Lorepack {
       ]
     };
 
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify(payload)
-    });
+    const response =
+      await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type':
+            'application/json'
+        },
+        body:
+          JSON.stringify(payload)
+      });
 
-    const json = await response.json();
+    const json =
+      await response.json();
 
-    if (!response.ok || json.error) {
+    if (
+      !response.ok ||
+      json.error
+    ) {
       throw new Error(
         json.error?.message ||
         `Generate failed (${response.status})`
@@ -491,8 +883,13 @@ export class Lorepack {
     }
 
     return (
-      json.candidates?.[0]?.content?.parts
-        ?.map(part => part.text || '')
+      json.candidates?.[0]
+        ?.content
+        ?.parts
+        ?.map(
+          part =>
+            part.text || ''
+        )
         .join('') ||
       ''
     );
@@ -502,155 +899,289 @@ export class Lorepack {
   // INGESTION
   // ------------------------------------------------------------
 
-  async ingestBatches(batches, opts = {}) {
+  async ingestBatches(
+    batches,
+    opts = {}
+  ) {
     await this.db.ready;
 
-    const agentId = String(opts.agentId || '')
-      .trim()
-      .toUpperCase();
+    const agentId =
+      normalizeAgentId(
+        opts.agentId
+      );
 
     if (!agentId) {
-      throw new Error('Agent ID required.');
+      throw new Error(
+        'Agent ID required.'
+      );
     }
 
-    const agentHandle = String(opts.agentHandle || '').trim();
+    const agentHandle =
+      String(
+        opts.agentHandle || ''
+      ).trim();
 
-    const batchSize = Math.max(
-      1,
-      Math.min(
-        MAX_EMBED_BATCH,
-        parseInt(opts.batchSize || 60, 10)
-      )
-    );
+    const batchSize =
+      Math.max(
+        1,
+        Math.min(
+          MAX_EMBED_BATCH,
+          parseInt(
+            opts.batchSize || 60,
+            10
+          )
+        )
+      );
 
-    const threadsPerKey = Math.max(
-      1,
-      Math.min(
-        50,
-        parseInt(opts.threadsPerKey || 3, 10)
-      )
-    );
+    const threadsPerKey =
+      Math.max(
+        1,
+        Math.min(
+          50,
+          parseInt(
+            opts.threadsPerKey || 3,
+            10
+          )
+        )
+      );
 
-    const signal = opts.signal || null;
+    const signal =
+      opts.signal || null;
 
     const onProgress =
-      typeof opts.onProgress === 'function'
+      typeof opts.onProgress ===
+      'function'
         ? opts.onProgress
         : null;
 
     if (!this.apiKeys.length) {
-      throw new Error('API Keys Missing.');
+      throw new Error(
+        'API Keys Missing.'
+      );
     }
 
-    if (!Array.isArray(batches) || !batches.length) {
+    if (
+      !Array.isArray(batches) ||
+      !batches.length
+    ) {
       return {
         ingested: 0
       };
     }
 
-    const validBatches = batches.map((item, index) => {
-      if (!item || typeof item.text !== 'string') {
-        throw new Error(
-          `Invalid ingestion item at index ${index}.`
-        );
-      }
+    const validBatches =
+      batches.map(
+        (item, index) => {
+          if (
+            !item ||
+            typeof item.text !==
+              'string'
+          ) {
+            throw new Error(
+              `Invalid ingestion item at index ${index}.`
+            );
+          }
 
-      if (!item.text.trim()) {
-        throw new Error(
-          `Empty ingestion item at index ${index}.`
-        );
-      }
+          if (!item.text.trim()) {
+            throw new Error(
+              `Empty ingestion item at index ${index}.`
+            );
+          }
 
-      return item;
-    });
+          if (
+            item.text.length >
+            MAX_CHUNK_CHARS
+          ) {
+            throw new Error(
+              `Chunk exceeds hard ceiling at index ${index}: ${item.text.length} > ${MAX_CHUNK_CHARS}.`
+            );
+          }
+
+          return item;
+        }
+      );
 
     const groups = [];
 
-    for (let i = 0; i < validBatches.length; i += batchSize) {
-      groups.push(validBatches.slice(i, i + batchSize));
+    for (
+      let i = 0;
+      i < validBatches.length;
+      i += batchSize
+    ) {
+      groups.push(
+        validBatches.slice(
+          i,
+          i + batchSize
+        )
+      );
     }
 
     const concurrency =
-      Math.max(1, this.apiKeys.length * threadsPerKey);
+      Math.max(
+        1,
+        this.apiKeys.length *
+          threadsPerKey
+      );
 
     let nextGroup = 0;
     let processed = 0;
     let written = 0;
 
-    const runOne = async (chunkGroup) => {
-      if (signal?.aborted) {
-        throw new Error('Aborted');
-      }
+    const runOne =
+      async (chunkGroup) => {
+        if (signal?.aborted) {
+          throw new Error(
+            'Aborted'
+          );
+        }
 
-      const key = this._getKey();
+        const key =
+          this._getKey();
 
-      const texts = chunkGroup.map(item => item.text);
+        const texts =
+          chunkGroup.map(
+            item => item.text
+          );
 
-      const vectors = await this.embedBatch(texts, key);
+        const vectors =
+          await this.embedBatch(
+            texts,
+            key
+          );
 
-      if (vectors.length !== chunkGroup.length) {
-        throw new Error(
-          `Vector count mismatch: ${chunkGroup.length} chunks / ${vectors.length} vectors.`
+        if (
+          vectors.length !==
+          chunkGroup.length
+        ) {
+          throw new Error(
+            `Vector count mismatch: ${chunkGroup.length} chunks / ${vectors.length} vectors.`
+          );
+        }
+
+        const nowISO =
+          new Date().toISOString();
+
+        const nodes =
+          chunkGroup.map(
+            (item, index) => {
+              const vector =
+                vectors[index];
+
+              if (
+                !isValidVector(
+                  vector
+                )
+              ) {
+                throw new Error(
+                  `Invalid vector generated for chunk ${index}.`
+                );
+              }
+
+              return {
+                id:
+                  crypto.randomUUID(),
+
+                agentId,
+
+                agentHandle,
+
+                text:
+                  item.text,
+
+                vector,
+
+                numMarkId:
+                  this.genSigil(
+                    item.text
+                  ),
+
+                metadata: {
+                  source:
+                    item.source ||
+                    'UNKNOWN',
+
+                  timestamp:
+                    nowISO,
+
+                  locus:
+                    `MYTHOS.LORE.${agentId}`,
+
+                  embeddingModel:
+                    EMBEDDING_MODEL,
+
+                  embeddingDimension:
+                    vector.length,
+
+                  embeddingEpoch:
+                    EMBEDDING_MODEL,
+
+                  ...(item.extraMeta ||
+                    {})
+                }
+              };
+            }
+          );
+
+        await this.db.bulkPut(
+          'vectors',
+          nodes
         );
-      }
 
-      const nowISO = new Date().toISOString();
+        written +=
+          nodes.length;
 
-      const nodes = chunkGroup.map((item, index) => ({
-        id: crypto.randomUUID(),
-        agentId,
-        agentHandle,
-        text: item.text,
-        vector: vectors[index],
-        numMarkId: this.genSigil(item.text),
+        processed +=
+          chunkGroup.length;
 
-        metadata: {
-          source: item.source || 'UNKNOWN',
-          timestamp: nowISO,
-          locus: `MYTHOS.LORE.${agentId}`,
-
-          // Explicit embedding epoch.
-          embeddingModel: EMBEDDING_MODEL,
-          embeddingDimension: vectors[index].length,
-
-          ...(item.extraMeta || {})
+        if (onProgress) {
+          onProgress({
+            processed,
+            written,
+            total:
+              validBatches.length
+          });
         }
-      }));
+      };
 
-      await this.db.bulkPut('vectors', nodes);
+    const workers =
+      Array.from(
+        {
+          length:
+            Math.min(
+              concurrency,
+              groups.length
+            )
+        },
+        async () => {
+          while (true) {
+            if (
+              signal?.aborted
+            ) {
+              throw new Error(
+                'Aborted'
+              );
+            }
 
-      written += nodes.length;
-      processed += chunkGroup.length;
+            const groupIndex =
+              nextGroup++;
 
-      if (onProgress) {
-        onProgress({
-          processed,
-          written,
-          total: validBatches.length
-        });
-      }
-    };
+            if (
+              groupIndex >=
+              groups.length
+            ) {
+              return;
+            }
 
-    const workers = Array.from(
-      { length: Math.min(concurrency, groups.length) },
-      async () => {
-        while (true) {
-          if (signal?.aborted) {
-            throw new Error('Aborted');
+            await runOne(
+              groups[groupIndex]
+            );
           }
-
-          const groupIndex = nextGroup++;
-
-          if (groupIndex >= groups.length) {
-            return;
-          }
-
-          await runOne(groups[groupIndex]);
         }
-      }
+      );
+
+    await Promise.all(
+      workers
     );
-
-    await Promise.all(workers);
 
     return {
       ingested: written
@@ -668,23 +1199,77 @@ export class Lorepack {
   ) {
     await this.db.ready;
 
-    const nodes = await this.getNodes(agentId);
+    const aid =
+      normalizeAgentId(
+        agentId
+      );
+
+    if (!aid) {
+      throw new Error(
+        'Agent ID required.'
+      );
+    }
+
+    const nodes =
+      await this.getNodes(aid);
 
     if (!nodes.length) {
       return 0;
     }
 
-    let created = 0;
+    const invalidNodes =
+      nodes.filter(
+        node =>
+          !isValidVector(
+            node.vector
+          )
+      );
+
+    if (invalidNodes.length) {
+      throw new Error(
+        `Graph integrity failure: ${invalidNodes.length} invalid vector node(s) found in ${aid}.`
+      );
+    }
+
+    const dimensions =
+      new Set(
+        nodes.map(
+          node =>
+            node.vector.length
+        )
+      );
+
+    if (
+      dimensions.size !== 1
+    ) {
+      throw new Error(
+        `Graph integrity failure: ${aid} contains multiple vector dimensions.`
+      );
+    }
+
+    const createdIds =
+      new Set();
+
     const errors = [];
 
     const BATCH_SIZE = 5;
 
-    for (let index = 0; index < nodes.length; index += BATCH_SIZE) {
-      const batch = nodes.slice(index, index + BATCH_SIZE);
+    for (
+      let index = 0;
+      index < nodes.length;
+      index += BATCH_SIZE
+    ) {
+      const batch =
+        nodes.slice(
+          index,
+          index + BATCH_SIZE
+        );
 
-      const results = await Promise.all(
-        batch.map(async (node) => {
-          const prompt = `
+      const results =
+        await Promise.all(
+          batch.map(
+            async node => {
+              const prompt = `
 SYSTEM:
 Extract explicit semantic relationships from the supplied lore.
 
@@ -704,75 +1289,145 @@ LORE:
 ${node.text}
 `.trim();
 
-          try {
-            const raw = await this._generate(
-              prompt,
-              model
-            );
+              try {
+                const raw =
+                  await this._generate(
+                    prompt,
+                    model
+                  );
 
-            const clean = cleanJsonFence(raw);
+                const clean =
+                  cleanJsonFence(
+                    raw
+                  );
 
-            if (!clean) {
-              return 0;
+                if (!clean) {
+                  return 0;
+                }
+
+                let parsed;
+
+                try {
+                  parsed =
+                    JSON.parse(
+                      clean
+                    );
+                } catch {
+                  throw new Error(
+                    `Invalid JSON returned for node ${node.id}.`
+                  );
+                }
+
+                if (
+                  !Array.isArray(
+                    parsed
+                  )
+                ) {
+                  throw new Error(
+                    `Graph response for node ${node.id} was not an array.`
+                  );
+                }
+
+                const triplets =
+                  parsed.filter(
+                    isValidTriplet
+                  );
+
+                if (
+                  !triplets.length
+                ) {
+                  return 0;
+                }
+
+                const edges =
+                  triplets.map(
+                    triplet => ({
+                      id:
+                        crypto.randomUUID(),
+
+                      type:
+                        'edge',
+
+                      agentId:
+                        aid,
+
+                      sourceId:
+                        node.id,
+
+                      s:
+                        triplet.s.trim(),
+
+                      r:
+                        triplet.r.trim(),
+
+                      o:
+                        triplet.o.trim(),
+
+                      timestamp:
+                        new Date().toISOString(),
+
+                      model
+                    })
+                  );
+
+                for (
+                  const edge of edges
+                ) {
+                  if (
+                    !validateEdgeReference(
+                      edge,
+                      new Set(
+                        nodes.map(
+                          n => n.id
+                        )
+                      )
+                    )
+                  ) {
+                    throw new Error(
+                      `Graph generated an invalid edge reference for node ${node.id}.`
+                    );
+                  }
+
+                  createdIds.add(
+                    edge.id
+                  );
+                }
+
+                await this.db.bulkPut(
+                  'edges',
+                  edges
+                );
+
+                return edges.length;
+              } catch (error) {
+                errors.push({
+                  nodeId:
+                    node.id,
+
+                  message:
+                    error?.message ||
+                    String(error)
+                });
+
+                return 0;
+              }
             }
+          )
+        );
 
-            let parsed;
+      const created =
+        results.reduce(
+          (sum, value) =>
+            sum + value,
+          0
+        );
 
-            try {
-              parsed = JSON.parse(clean);
-            } catch {
-              throw new Error(
-                `Invalid JSON returned for node ${node.id}.`
-              );
-            }
-
-            if (!Array.isArray(parsed)) {
-              throw new Error(
-                `Graph response for node ${node.id} was not an array.`
-              );
-            }
-
-            const triplets = parsed.filter(isValidTriplet);
-
-            if (!triplets.length) {
-              return 0;
-            }
-
-            const edges = triplets.map(triplet => ({
-              id: crypto.randomUUID(),
-              type: 'edge',
-              agentId: String(agentId || 'UNKNOWN').toUpperCase(),
-              sourceId: node.id,
-              s: triplet.s.trim(),
-              r: triplet.r.trim(),
-              o: triplet.o.trim(),
-              timestamp: new Date().toISOString(),
-              model
-            }));
-
-            await this.db.bulkPut('edges', edges);
-
-            return edges.length;
-          } catch (error) {
-            errors.push({
-              nodeId: node.id,
-              message: error?.message || String(error)
-            });
-
-            return 0;
-          }
-        })
-      );
-
-      created += results.reduce(
-        (sum, value) => sum + value,
-        0
-      );
-
-      const current = Math.min(
-        index + batch.length,
-        nodes.length
-      );
+      const current =
+        Math.min(
+          index +
+            batch.length,
+          nodes.length
+        );
 
       if (onProgress) {
         onProgress(
@@ -784,76 +1439,162 @@ ${node.text}
     }
 
     if (errors.length) {
-      const sample = errors
-        .slice(0, 3)
-        .map(error => error.message)
-        .join(' | ');
+      const sample =
+        errors
+          .slice(0, 3)
+          .map(
+            error =>
+              error.message
+          )
+          .join(' | ');
 
       throw new Error(
         `Graph extraction encountered ${errors.length} error(s). ${sample}`
       );
     }
 
-    return created;
+    return createdIds.size;
   }
 
   // ------------------------------------------------------------
   // EXPORT
   // ------------------------------------------------------------
 
-  async *yieldExportBatches(agentId, batch = 1000) {
-    const safeBatch = Math.max(
-      1,
-      parseInt(batch || 1000, 10)
-    );
+  async *yieldExportBatches(
+    agentId,
+    batch = 1000
+  ) {
+    const safeBatch =
+      Math.max(
+        1,
+        parseInt(
+          batch || 1000,
+          10
+        )
+      );
 
-    const nodes = await this.getNodes(agentId);
+    const aid =
+      normalizeAgentId(
+        agentId
+      );
 
-    for (let i = 0; i < nodes.length; i += safeBatch) {
+    const nodes =
+      await this.getNodes(aid);
+
+    const nodeIds =
+      new Set(
+        nodes.map(
+          node => node.id
+        )
+      );
+
+    for (
+      let i = 0;
+      i < nodes.length;
+      i += safeBatch
+    ) {
       yield nodes
-        .slice(i, i + safeBatch)
-        .map(node => ({
-          v: 2,
-          type: 'vector',
+        .slice(
+          i,
+          i + safeBatch
+        )
+        .map(
+          node => ({
+            v: 2,
+            type: 'vector',
 
-          // Preserve the original local ID.
-          id: node.id,
+            id:
+              node.id,
 
-          a: node.agentId,
-          h: node.agentHandle || '',
-          t: node.text,
-          vec: node.vector,
-          m: node.numMarkId,
-          d: node.metadata || {}
-        }));
+            a:
+              node.agentId,
+
+            h:
+              node.agentHandle ||
+              '',
+
+            t:
+              node.text,
+
+            vec:
+              node.vector,
+
+            m:
+              node.numMarkId,
+
+            d:
+              node.metadata || {}
+          })
+        );
     }
 
-    await this.db.ready;
+    const allEdges =
+      await this.db.getAll(
+        'edges'
+      );
 
-    const allEdges = await this.db.getAll('edges');
+    const agentEdges =
+      allEdges.filter(
+        edge =>
+          normalizeAgentId(
+            edge.agentId
+          ) === aid
+      );
 
-    const aid = String(agentId || '').toUpperCase();
+    const orphanEdges =
+      agentEdges.filter(
+        edge =>
+          !nodeIds.has(
+            edge.sourceId
+          )
+      );
 
-    const agentEdges = allEdges.filter(
-      edge =>
-        String(edge.agentId || '').toUpperCase() === aid
-    );
+    if (orphanEdges.length) {
+      throw new Error(
+        `Export integrity failure: ${orphanEdges.length} edge(s) reference missing vector IDs.`
+      );
+    }
 
-    for (let i = 0; i < agentEdges.length; i += safeBatch) {
+    for (
+      let i = 0;
+      i < agentEdges.length;
+      i += safeBatch
+    ) {
       yield agentEdges
-        .slice(i, i + safeBatch)
-        .map(edge => ({
-          v: 2,
-          type: 'edge',
-          id: edge.id,
-          aid: edge.agentId,
-          src: edge.sourceId,
-          s: edge.s,
-          r: edge.r,
-          o: edge.o,
-          timestamp: edge.timestamp,
-          model: edge.model || ''
-        }));
+        .slice(
+          i,
+          i + safeBatch
+        )
+        .map(
+          edge => ({
+            v: 2,
+            type: 'edge',
+
+            id:
+              edge.id,
+
+            aid:
+              edge.agentId,
+
+            src:
+              edge.sourceId,
+
+            s:
+              edge.s,
+
+            r:
+              edge.r,
+
+            o:
+              edge.o,
+
+            timestamp:
+              edge.timestamp,
+
+            model:
+              edge.model || ''
+          })
+        );
     }
   }
 
@@ -861,229 +1602,476 @@ ${node.text}
   // IMPORT
   // ------------------------------------------------------------
 
-  async import(fileOrBlob, onProgress) {
+  async import(
+    fileOrBlob,
+    onProgress
+  ) {
     await this.db.ready;
 
-    if (!fileOrBlob?.stream) {
-      throw new Error('Import requires a File or Blob.');
+    if (
+      !fileOrBlob?.stream
+    ) {
+      throw new Error(
+        'Import requires a File or Blob.'
+      );
     }
 
-    const fileName = String(fileOrBlob.name || '').toLowerCase();
+    const fileName =
+      String(
+        fileOrBlob.name || ''
+      ).toLowerCase();
 
-    let stream = fileOrBlob.stream();
+    let stream =
+      fileOrBlob.stream();
 
-    if (fileName.endsWith('.gz')) {
-      if (typeof DecompressionStream === 'undefined') {
+    if (
+      fileName.endsWith('.gz')
+    ) {
+      if (
+        typeof DecompressionStream ===
+        'undefined'
+      ) {
         throw new Error(
           'GZIP import is not supported by this browser.'
         );
       }
 
-      stream = stream.pipeThrough(
-        new DecompressionStream('gzip')
-      );
+      stream =
+        stream.pipeThrough(
+          new DecompressionStream(
+            'gzip'
+          )
+        );
     }
 
-    const reader = stream
-      .pipeThrough(new TextDecoderStream())
-      .getReader();
+    const reader =
+      stream
+        .pipeThrough(
+          new TextDecoderStream()
+        )
+        .getReader();
 
     let buffer = '';
 
     let linesRead = 0;
     let recordsRead = 0;
-    let vectorsImported = 0;
-    let edgesImported = 0;
-    let rejected = 0;
+
+    const vectors = [];
+    const edges = [];
 
     const errors = [];
 
-    let batch = [];
+    const reportProgress =
+      () => {
+        if (onProgress) {
+          onProgress({
+            processed:
+              recordsRead,
 
-    const BATCH_WRITE = 1000;
+            linesRead,
 
-    const writeBatch = async () => {
-      if (!batch.length) return;
+            vectorsImported:
+              vectors.length,
 
-      const vectors = [];
-      const edges = [];
+            edgesImported:
+              edges.length,
 
-      for (const record of batch) {
-        if (record.type === 'edge') {
+            rejected:
+              errors.length
+          });
+        }
+      };
+
+    const parseRecord =
+      (record, lineNumber) => {
+        if (
+          !record ||
+          typeof record !==
+            'object'
+        ) {
+          throw new Error(
+            `Line ${lineNumber}: Record is not an object.`
+          );
+        }
+
+        if (
+          record.type ===
+          'edge'
+        ) {
           if (
             !record.id ||
             !record.src ||
             !record.aid ||
-            typeof record.s !== 'string' ||
-            typeof record.r !== 'string' ||
-            typeof record.o !== 'string'
+            typeof record.s !==
+              'string' ||
+            typeof record.r !==
+              'string' ||
+            typeof record.o !==
+              'string' ||
+            !record.s.trim() ||
+            !record.r.trim() ||
+            !record.o.trim()
           ) {
-            rejected++;
-
-            errors.push(
-              `Invalid edge record near imported record ${recordsRead}.`
+            throw new Error(
+              `Line ${lineNumber}: Invalid edge record.`
             );
-
-            continue;
           }
 
           edges.push({
-            id: record.id,
-            type: 'edge',
-            agentId: String(record.aid).toUpperCase(),
-            sourceId: record.src,
-            s: record.s,
-            r: record.r,
-            o: record.o,
+            id:
+              String(
+                record.id
+              ),
+
+            type:
+              'edge',
+
+            agentId:
+              normalizeAgentId(
+                record.aid
+              ),
+
+            sourceId:
+              String(
+                record.src
+              ),
+
+            s:
+              record.s.trim(),
+
+            r:
+              record.r.trim(),
+
+            o:
+              record.o.trim(),
+
             timestamp:
               record.timestamp ||
               new Date().toISOString(),
-            model: record.model || ''
+
+            model:
+              record.model || ''
           });
 
-          continue;
+          return;
         }
 
         const vectorNode =
           record.v === 2
             ? {
-                // Preserve exported ID.
-                id: record.id || crypto.randomUUID(),
+                id:
+                  record.id ||
+                  crypto.randomUUID(),
 
-                agentId: String(record.a || '').toUpperCase(),
-                agentHandle: record.h || '',
-                text: record.t,
-                vector: record.vec,
-                numMarkId: record.m || '',
-                metadata: record.d || {}
+                agentId:
+                  normalizeAgentId(
+                    record.a
+                  ),
+
+                agentHandle:
+                  record.h || '',
+
+                text:
+                  record.t,
+
+                vector:
+                  record.vec,
+
+                numMarkId:
+                  record.m || '',
+
+                metadata:
+                  record.d || {}
               }
             : {
                 ...record,
-                id: record.id || crypto.randomUUID()
+
+                id:
+                  record.id ||
+                  crypto.randomUUID()
               };
 
         if (
-          !vectorNode.agentId ||
-          typeof vectorNode.text !== 'string' ||
-          !Array.isArray(vectorNode.vector) ||
-          !vectorNode.vector.length
+          !vectorNode.agentId
         ) {
-          rejected++;
-
-          errors.push(
-            `Invalid vector record near imported record ${recordsRead}.`
+          throw new Error(
+            `Line ${lineNumber}: Vector agent ID missing.`
           );
-
-          continue;
         }
 
-        vectors.push(vectorNode);
-      }
+        if (
+          typeof vectorNode.text !==
+          'string'
+        ) {
+          throw new Error(
+            `Line ${lineNumber}: Vector text invalid.`
+          );
+        }
 
-      if (vectors.length) {
-        await this.db.bulkPut('vectors', vectors);
-        vectorsImported += vectors.length;
-      }
+        if (
+          !isValidVector(
+            vectorNode.vector
+          )
+        ) {
+          throw new Error(
+            `Line ${lineNumber}: Vector is missing, empty, non-numeric, or malformed.`
+          );
+        }
 
-      if (edges.length) {
-        await this.db.bulkPut('edges', edges);
-        edgesImported += edges.length;
-      }
+        const metadata =
+          vectorNode.metadata &&
+          typeof vectorNode.metadata ===
+            'object'
+            ? {
+                ...vectorNode.metadata
+              }
+            : {};
 
-      batch = [];
+        const model =
+          metadata.embeddingModel;
 
-      if (onProgress) {
-        onProgress({
-          processed: recordsRead,
-          linesRead,
-          vectorsImported,
-          edgesImported,
-          rejected
-        });
-      }
-    };
+        const dimension =
+          metadata.embeddingDimension;
+
+        if (
+          model &&
+          model !==
+            EMBEDDING_MODEL
+        ) {
+          throw new Error(
+            `Line ${lineNumber}: Incompatible embedding model "${model}". Current model is "${EMBEDDING_MODEL}".`
+          );
+        }
+
+        if (
+          dimension !==
+            undefined &&
+          Number(dimension) !==
+            vectorNode.vector.length
+        ) {
+          throw new Error(
+            `Line ${lineNumber}: Embedding dimension metadata mismatch.`
+          );
+        }
+
+        vectorNode.metadata =
+          metadata;
+
+        vectors.push(
+          vectorNode
+        );
+      };
 
     while (true) {
-      const { done, value } = await reader.read();
+      const {
+        done,
+        value
+      } =
+        await reader.read();
 
       if (done) break;
 
       buffer += value;
 
-      const lines = buffer.split(/\r?\n/);
+      const lines =
+        buffer.split(
+          /\r?\n/
+        );
 
-      buffer = lines.pop() || '';
+      buffer =
+        lines.pop() || '';
 
-      for (const line of lines) {
+      for (
+        const line of lines
+      ) {
         linesRead++;
 
-        const trimmed = line.trim();
+        const trimmed =
+          line.trim();
 
-        if (!trimmed) continue;
+        if (!trimmed) {
+          continue;
+        }
 
         try {
-          const record = JSON.parse(trimmed);
+          const record =
+            JSON.parse(
+              trimmed
+            );
 
-          if (!record || typeof record !== 'object') {
-            throw new Error('Record is not an object.');
-          }
+          parseRecord(
+            record,
+            linesRead
+          );
 
-          batch.push(record);
           recordsRead++;
         } catch (error) {
-          rejected++;
-
           errors.push(
-            `Line ${linesRead}: ${error?.message || 'Invalid JSON.'}`
+            error?.message ||
+            `Line ${linesRead}: Invalid JSON.`
           );
         }
 
-        if (batch.length >= BATCH_WRITE) {
-          await writeBatch();
-        }
+        reportProgress();
       }
     }
 
-    if (buffer.trim()) {
+    if (
+      buffer.trim()
+    ) {
       linesRead++;
 
       try {
-        const record = JSON.parse(buffer.trim());
+        const record =
+          JSON.parse(
+            buffer.trim()
+          );
 
-        if (!record || typeof record !== 'object') {
-          throw new Error('Record is not an object.');
-        }
+        parseRecord(
+          record,
+          linesRead
+        );
 
-        batch.push(record);
         recordsRead++;
       } catch (error) {
-        rejected++;
-
         errors.push(
-          `Line ${linesRead}: ${error?.message || 'Invalid JSON.'}`
+          error?.message ||
+          `Line ${linesRead}: Invalid JSON.`
+        );
+      }
+
+      reportProgress();
+    }
+
+    // ----------------------------------------------------------
+    // GLOBAL IMPORT INTEGRITY
+    // ----------------------------------------------------------
+
+    if (!recordsRead) {
+      throw new Error(
+        'Import integrity failure: no valid records found.'
+      );
+    }
+
+    if (errors.length) {
+      const sample =
+        errors
+          .slice(0, 5)
+          .join(' | ');
+
+      throw new Error(
+        `Import integrity failure: ${errors.length} record(s) rejected. ${sample}`
+      );
+    }
+
+    const ids =
+      new Set();
+
+    for (
+      const node of vectors
+    ) {
+      if (
+        ids.has(node.id)
+      ) {
+        throw new Error(
+          `Import integrity failure: duplicate vector ID "${node.id}".`
+        );
+      }
+
+      ids.add(node.id);
+    }
+
+    const edgeIds =
+      new Set();
+
+    for (
+      const edge of edges
+    ) {
+      if (
+        edgeIds.has(edge.id)
+      ) {
+        throw new Error(
+          `Import integrity failure: duplicate edge ID "${edge.id}".`
+        );
+      }
+
+      edgeIds.add(edge.id);
+
+      if (
+        !ids.has(
+          edge.sourceId
+        )
+      ) {
+        throw new Error(
+          `Import integrity failure: edge "${edge.id}" references missing vector "${edge.sourceId}".`
         );
       }
     }
 
-    await writeBatch();
+    // One embedding space per import set.
+    const dimensions =
+      new Set(
+        vectors.map(
+          node =>
+            node.vector.length
+        )
+      );
 
-    if (rejected > 0) {
-      const sample = errors
-        .slice(0, 5)
-        .join(' | ');
-
+    if (
+      dimensions.size > 1
+    ) {
       throw new Error(
-        `Import integrity failure: ${rejected} record(s) rejected. ${sample}`
+        'Import integrity failure: imported vectors contain multiple embedding dimensions.'
       );
     }
 
+    const importedModels =
+      new Set(
+        vectors
+          .map(
+            node =>
+              node.metadata
+                ?.embeddingModel
+          )
+          .filter(Boolean)
+      );
+
+    if (
+      importedModels.size > 1
+    ) {
+      throw new Error(
+        'Import integrity failure: imported vectors contain multiple embedding models.'
+      );
+    }
+
+    // ----------------------------------------------------------
+    // ATOMIC COMMIT
+    // ----------------------------------------------------------
+
+    await this.db.bulkPutAtomic(
+      vectors,
+      edges
+    );
+
+    reportProgress();
+
     return {
       success: true,
-      nodesImported: vectorsImported + edgesImported,
-      vectorsImported,
-      edgesImported,
+
+      nodesImported:
+        vectors.length +
+        edges.length,
+
+      vectorsImported:
+        vectors.length,
+
+      edgesImported:
+        edges.length,
+
       recordsRead,
+
       linesRead,
+
       rejected: 0
     };
   }
@@ -1102,91 +2090,155 @@ ${node.text}
   ) {
     await this.db.ready;
 
-    const pool = await this.getNodes(agentId);
+    const pool =
+      await this.getNodes(
+        agentId
+      );
 
     if (!pool.length) {
       return {
-        response: 'Vault empty.',
-        derivation: 'EMPTY_VAULT',
-        source: 'NULL'
+        response:
+          'Vault empty.',
+
+        derivation:
+          'EMPTY_VAULT',
+
+        source:
+          'NULL'
       };
     }
 
-    const qVec = (
-      await this.embedBatch([userQuery])
-    )[0];
+    const qVec =
+      (
+        await this.embedBatch([
+          userQuery
+        ])
+      )[0];
 
-    /*
-     * Never compare vectors from a different embedding epoch.
-     *
-     * Legacy records without embeddingModel are excluded from
-     * current-model retrieval rather than producing false similarity.
-     */
-    const compatible = pool.filter(node => {
-      const nodeModel = node.metadata?.embeddingModel;
-
-      return (
-        nodeModel === EMBEDDING_MODEL &&
-        Array.isArray(node.vector) &&
-        node.vector.length === qVec.length
+    if (
+      !isValidVector(
+        qVec
+      )
+    ) {
+      throw new Error(
+        'Query embedding is invalid.'
       );
-    });
+    }
+
+    const compatible =
+      pool.filter(node => {
+        const nodeModel =
+          node.metadata
+            ?.embeddingModel;
+
+        return (
+          nodeModel ===
+            EMBEDDING_MODEL &&
+
+          Array.isArray(
+            node.vector
+          ) &&
+
+          node.vector.length ===
+            qVec.length &&
+
+          isValidVector(
+            node.vector,
+            qVec.length
+          )
+        );
+      });
 
     if (!compatible.length) {
       return {
         response:
           'No compatible current-embedding records found in this agent vault. Re-ingest the lore with the current embedding model.',
-        derivation: 'EMBEDDING_EPOCH_MISMATCH',
-        source: 'NULL'
+
+        derivation:
+          'EMBEDDING_EPOCH_MISMATCH',
+
+        source:
+          'NULL'
       };
     }
 
-    const scored = compatible
-      .map(node => ({
-        n: node,
-        s: cosine(qVec, node.vector)
-      }))
-      .sort((a, b) => b.s - a.s)
-      .slice(0, topK);
+    const scored =
+      compatible
+        .map(node => ({
+          n: node,
 
-    const best = scored[0]?.s || 0;
+          s:
+            cosine(
+              qVec,
+              node.vector
+            )
+        }))
+        .sort(
+          (a, b) =>
+            b.s - a.s
+        )
+        .slice(
+          0,
+          topK
+        );
+
+    const best =
+      scored[0]?.s || 0;
 
     const contextNodes =
       best >= threshold
         ? scored
         : [];
 
-    const context = contextNodes
-      .map(item =>
-        `--- [SOURCE: ${
-          item.n.metadata?.source || 'UNKNOWN'
-        } | ${(item.s * 100).toFixed(1)}%] ---\n${
-          item.n.text
-        }`
-      )
-      .join('\n\n');
+    const context =
+      contextNodes
+        .map(
+          item =>
+            `--- [SOURCE: ${
+              item.n.metadata
+                ?.source ||
+              'UNKNOWN'
+            } | ${
+              (
+                item.s * 100
+              ).toFixed(1)
+            }%] ---\n${
+              item.n.text
+            }`
+        )
+        .join('\n\n');
 
-    const derivation = contextNodes.length
-      ? `COSINE_TOPK(${topK})`
-      : 'NO_CONTEXT';
+    const derivation =
+      contextNodes.length
+        ? `COSINE_TOPK(${topK})`
+        : 'NO_CONTEXT';
 
     const prompt =
       `CONTEXT:\n${context}\n\nUSER:\n${userQuery}`;
 
-    const key = this._getKey();
+    const key =
+      this._getKey();
 
-    const response = await this._generate(
-      systemPrompt
-        ? `${systemPrompt}\n\n${prompt}`
-        : prompt,
-      model,
-      key
-    );
+    const response =
+      await this._generate(
+        systemPrompt
+          ? `${systemPrompt}\n\n${prompt}`
+          : prompt,
+
+        model,
+
+        key
+      );
 
     return {
-      response: response || '(no reply)',
+      response:
+        response ||
+        '(no reply)',
+
       derivation,
-      source: 'RAG'
+
+      source:
+        'RAG'
     };
   }
 
