@@ -1,5 +1,5 @@
-export { LorepackFactory } from './lorepack-factory.ts';
-export { IndexedDbLorepackStore } from './indexeddb-store.ts';
+export { LorepackFactory } from './lorepack-factory.js';
+export { IndexedDbLorepackStore } from './indexeddb-store.js';
 export type {
   ImportProgress,
   LorepackModel,
@@ -7,4 +7,4 @@ export type {
   Triplet,
   TripletEdge,
   VectorRecord,
-} from './types.ts';
+} from './types.js';

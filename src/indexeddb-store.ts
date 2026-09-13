@@ -1,4 +1,4 @@
-import type { LorepackStore, TripletEdge, VectorRecord } from './types.ts';
+import type { LorepackStore, TripletEdge, VectorRecord } from './types.js';
 
 const VECTOR_STORE = 'vectors';
 const EDGE_STORE = 'edges';

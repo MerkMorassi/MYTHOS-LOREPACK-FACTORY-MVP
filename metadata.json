@@ -1,6 +1,0 @@
-{
-  "name": "Mythos Lorepack Factory",
-  "description": "An engineering interface to create, store, retrieve, transport, and restore compiled memory using the local-first Lorepack system.",
-  "requestFramePermissions": [],
-  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
-}

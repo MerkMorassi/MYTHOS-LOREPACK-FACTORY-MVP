@@ -4,7 +4,7 @@ import type {
   LorepackStore,
   TripletEdge,
   VectorRecord,
-} from './types.ts';
+} from './types.js';
 
 const LAST_SYNC_KEY = 'mythos_lorepack_last_sync';
 
