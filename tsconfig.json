@@ -10,8 +10,9 @@
     "strict": true,
     "skipLibCheck": true,
     "noEmit": true,
-    "allowImportingTsExtensions": true
+    "allowImportingTsExtensions": true,
+    "jsx": "react-jsx"
   },
-  "include": ["src/**/*.ts"],
-  "exclude": ["src/_studio/**"]
+  "include": ["src/**/*.ts", "src/**/*.tsx"],
+  "exclude": ["src/_studio/**", "src/ui/**"]
 }

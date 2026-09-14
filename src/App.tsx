@@ -14,6 +14,8 @@ import {
 } from './agents.ts';
 import { runMvpTestMatrix } from './core-test-runner.ts';
 import type { TestSuiteState } from './core-test-runner.ts';
+import { NavBar, AppSectionTab } from './components/NavBar.tsx';
+import { MonolithicView } from './components/MonolithicView.tsx';
 import { 
   Terminal, 
   Database, 
@@ -50,6 +52,9 @@ export default function App() {
   // Custom Multi-Key Rotation Pool States
   const [customApiKeys, setCustomApiKeys] = useState<string[]>([]);
   const [newKeyInput, setNewKeyInput] = useState<string>('');
+
+  // Navigation Section Tab State (Defaults to Monolithic Style)
+  const [activeNavTab, setActiveNavTab] = useState<AppSectionTab>('monolithic');
 
   // Selection (Canonical 16 MythOS Agent Roster)
   const [agentId, setAgentId] = useState<string>(DEFAULT_CANONICAL_AGENT.id);
@@ -559,7 +564,7 @@ export default function App() {
           const freshStats = await factory.getStats(agentId);
           setStats(freshStats);
         } else {
-          setStats({ vectorsCount: 0, edgesCount: 0, agentId });
+          setStats({ totalNodes: 0, totalEdges: 0 });
         }
 
         // Await explorer refresh immediately after the transaction success is confirmed
@@ -650,6 +655,344 @@ export default function App() {
     }
   };
 
+  // Sacred Architectural Anchors & Compatibility Bindings
+  const runExport = handleExportLorepack;
+  const runImport = () => { fileInputRef.current?.click(); };
+  const runIngest = handleIngestText;
+  const runChat = handleIngestChatTurn;
+  const handleExportGzip = handleExportLorepack;
+  const handleImportGzip = handleImportFile;
+  const isExporting = exporting;
+  const isImporting = importProgress.active;
+  const stageFiles = (files: FileList | File[]) => {
+    const fileList = Array.from(files);
+    if (fileList.length > 0) {
+      const file = fileList[0];
+      setLoadedFileName(file.name);
+      setLoadedFileSize(file.size);
+      setSourceId(file.name);
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        const text = event.target?.result as string;
+        setSourceText(text);
+        log(`[FILE]: Staged file ${file.name} successfully. Size: ${file.size} bytes.`);
+      };
+      reader.readAsText(file);
+    }
+  };
+  const saveParams = (params: Record<string, any>) => {
+    try {
+      localStorage.setItem('mythos_saved_params', JSON.stringify(params));
+    } catch (e) {
+      console.error(e);
+    }
+  };
+  const loadSavedParams = () => {
+    try {
+      const p = localStorage.getItem('mythos_saved_params');
+      return p ? JSON.parse(p) : {};
+    } catch {
+      return {};
+    }
+  };
+
+  // Reusable sub-module blocks for dynamic multi-section navigation
+  const processLogsModule = (
+    <section className="bg-neutral-900 border border-neutral-800 rounded flex flex-col h-[320px]">
+      <div className="border-b border-neutral-800 px-4 py-3 flex items-center justify-between bg-neutral-900/60">
+        <div className="flex items-center space-x-2">
+          <Terminal className="h-4 w-4 text-emerald-400" />
+          <h2 className="text-xs font-bold text-white uppercase tracking-wider">Hardware Process Logs</h2>
+        </div>
+        <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
+      </div>
+
+      <div className="p-3 bg-neutral-950 font-mono text-[10px] overflow-y-auto flex-1 flex flex-col-reverse divide-y divide-neutral-900/50">
+        {systemLog.map((logStr, index) => {
+          let colorClass = 'text-neutral-400';
+          if (logStr.includes('[ERROR]')) colorClass = 'text-rose-400';
+          if (logStr.includes('[CRITICAL]')) colorClass = 'text-red-500 font-bold';
+          if (logStr.includes('[INGEST]')) colorClass = 'text-emerald-400';
+          if (logStr.includes('[CONVERSE]')) colorClass = 'text-teal-400';
+          if (logStr.includes('[GRAPH]')) colorClass = 'text-blue-400';
+          if (logStr.includes('[EXPORT]') || logStr.includes('[IMPORT]')) colorClass = 'text-purple-400';
+
+          return (
+            <div key={index} className={`py-1 ${colorClass}`}>
+              {logStr}
+            </div>
+          );
+        })}
+      </div>
+    </section>
+  );
+
+  const apiKeysModule = (
+    <section className="bg-neutral-900 border border-neutral-800 rounded flex flex-col">
+      <div className="border-b border-neutral-800 px-4 py-3 flex items-center justify-between bg-neutral-900/60">
+        <div className="flex items-center space-x-2">
+          <Cpu className="h-4 w-4 text-emerald-400" />
+          <h2 className="text-xs font-bold text-white uppercase tracking-wider">Multi-Lane API Load Balancer</h2>
+        </div>
+        <span className="text-[10px] text-neutral-500">SYS_LANES</span>
+      </div>
+
+      <div className="p-4 flex flex-col gap-3">
+        <p className="text-[11px] text-neutral-400 leading-relaxed font-mono">
+          Register multiple Gemini API Keys. The engine automatically rotates requests sequentially across active lanes to bypass quota boundaries.
+        </p>
+
+        <div className="flex gap-2">
+          <input
+            type="password"
+            value={newKeyInput}
+            onChange={(e) => setNewKeyInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                addApiKey(newKeyInput);
+              }
+            }}
+            className="flex-1 bg-neutral-950 text-neutral-200 border border-neutral-800 px-3 py-1.5 rounded font-mono text-xs focus:outline-none focus:border-neutral-700"
+            placeholder="AIzaSy..."
+          />
+          <button
+            onClick={() => addApiKey(newKeyInput)}
+            className="bg-neutral-800 hover:bg-neutral-700 text-white px-3 py-1.5 rounded text-xs font-bold uppercase tracking-wider cursor-pointer"
+          >
+            Add Key
+          </button>
+        </div>
+
+        {customApiKeys.length > 0 ? (
+          <div className="space-y-1.5 border border-neutral-800 rounded p-2 bg-neutral-950 max-h-[140px] overflow-y-auto">
+            {customApiKeys.map((k, i) => (
+              <div key={i} className="flex items-center justify-between text-xs font-mono py-1 px-2 bg-neutral-900 rounded border border-neutral-800">
+                <span className="text-neutral-300">Lane #{i + 1}: ••••••••{k.slice(-4)}</span>
+                <button
+                  onClick={() => removeApiKey(i)}
+                  className="text-rose-400 hover:text-rose-300 text-[10px] uppercase font-bold cursor-pointer"
+                >
+                  Revoke
+                </button>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="text-[10px] text-neutral-500 italic uppercase">
+            No custom API keys registered. Falling back to secure server-side proxy lanes.
+          </p>
+        )}
+      </div>
+    </section>
+  );
+
+  const transportModule = (
+    <section className="bg-neutral-900 border border-neutral-800 rounded flex flex-col">
+      <div className="border-b border-neutral-800 px-4 py-3 flex items-center justify-between bg-neutral-900/60">
+        <div className="flex items-center space-x-2">
+          <FileText className="h-4 w-4 text-emerald-400" />
+          <h2 className="text-xs font-bold text-white uppercase tracking-wider">Compiled Memory Transport</h2>
+        </div>
+        <span className="text-[10px] text-neutral-500">GZIP_COMPRESSED</span>
+      </div>
+
+      <div className="p-4 flex flex-col gap-4">
+        <div>
+          <button
+            id="exportBtn"
+            onClick={handleExportLorepack}
+            disabled={exporting || stats.totalNodes === 0}
+            className="w-full bg-neutral-800 hover:bg-neutral-700 text-white font-bold px-4 py-2.5 rounded text-xs uppercase tracking-wider flex items-center justify-center space-x-2 transition-colors border border-neutral-700 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+          >
+            <Download className="h-3.5 w-3.5 text-emerald-400" />
+            <span>{exporting ? 'Packaging Archive...' : 'Compile & Export Lorepack'}</span>
+          </button>
+        </div>
+
+        <div className="border-t border-neutral-800 pt-3">
+          <span className="block text-[10px] text-neutral-400 font-bold uppercase tracking-wider mb-2">
+            Import Lorepack Archive (.lorepack.gz)
+          </span>
+          <label 
+            htmlFor="archiveUploadInput"
+            className="block border border-dashed border-neutral-700 hover:border-neutral-500 bg-neutral-950 p-4 rounded text-center cursor-pointer transition-colors"
+          >
+            <Upload className="h-5 w-5 text-neutral-500 mx-auto mb-1" />
+            <span className="text-xs text-neutral-300 block font-bold">Select Archive File</span>
+            <span className="text-[9px] text-neutral-500 block mt-0.5 font-mono">Format: [agent]-[source].lorepack.gz</span>
+            <input 
+              id="archiveUploadInput"
+              type="file" 
+              accept=".gz,.lorepack.gz,.jsonl,application/gzip" 
+              onChange={handleImportFile} 
+              disabled={importProgress.active}
+              className="hidden" 
+            />
+          </label>
+        </div>
+
+        {lastImportResults && (
+          <div className="border border-neutral-800 rounded bg-neutral-950 p-3 text-xs space-y-2">
+            <span className="text-[10px] text-emerald-400 uppercase font-bold tracking-wider block">
+              Archive Ingestion Report
+            </span>
+            <div className="grid grid-cols-2 gap-2 text-[11px]">
+              <div>
+                <span className="text-neutral-500">Ingested Nodes:</span>
+                <span className="text-white font-bold ml-1">{lastImportResults.vectorsCount}</span>
+              </div>
+              <div>
+                <span className="text-neutral-500">Ingested Edges:</span>
+                <span className="text-white font-bold ml-1">{lastImportResults.edgesCount}</span>
+              </div>
+            </div>
+            {lastImportResults.metadata && (
+              <div>
+                <span className="text-[9px] text-neutral-500 uppercase block mb-1">Archive Metadata</span>
+                <pre className="text-[8px] text-neutral-400 bg-neutral-900 border border-neutral-800 p-1.5 rounded truncate">
+                  {lastImportResults.metadata}
+                </pre>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </section>
+  );
+
+  const testMatrixModule = (
+    <section className="bg-neutral-900 border border-neutral-800 rounded flex flex-col">
+      <div className="border-b border-neutral-800 px-4 py-3 flex items-center justify-between bg-neutral-900/60">
+        <div className="flex items-center space-x-2">
+          <Layers className="h-4 w-4 text-purple-400" />
+          <h2 className="text-xs font-bold text-white uppercase tracking-wider">MVP Core Test Matrix v0.1</h2>
+        </div>
+        <span className="text-[10px] text-neutral-500">SYS_TEST</span>
+      </div>
+
+      <div className="p-4 flex flex-col gap-3">
+        <p className="text-[11px] text-neutral-400 leading-relaxed font-mono">
+          Verify the integrity of the Lorepack compilation, database, and export/import round-trip pipeline under isolated workspaces.
+        </p>
+
+        <div>
+          <button
+            id="testMatrixBtn"
+            onClick={handleRunTestSuite}
+            disabled={testState.isRunning}
+            className="w-full bg-purple-950/40 border border-purple-800 text-purple-300 font-bold px-4 py-2 rounded text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition-colors hover:bg-purple-900 hover:text-white disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+          >
+            <RefreshCw className={`h-3.5 w-3.5 ${testState.isRunning ? 'animate-spin' : ''}`} />
+            {testState.isRunning ? 'Running Verification Pipeline...' : 'Run Core Validation Matrix'}
+          </button>
+        </div>
+
+        {testState.results.length > 0 && (
+          <div className="border border-neutral-800 rounded bg-neutral-950 p-2 text-xs space-y-1.5 max-h-[220px] overflow-y-auto">
+            {testState.results.map((res) => {
+              let badgeColor = 'text-neutral-500 border-neutral-800 bg-neutral-950/40';
+              if (res.status === 'RUNNING') badgeColor = 'text-amber-500 border-amber-800 bg-amber-950/30 animate-pulse';
+              if (res.status === 'PASSED') badgeColor = 'text-emerald-400 border-emerald-800 bg-emerald-950/40';
+              if (res.status === 'FAILED') badgeColor = 'text-rose-400 border-rose-800 bg-rose-950/40';
+
+              return (
+                <div key={res.id} className="flex items-start justify-between gap-2 py-1 border-b border-neutral-900 last:border-0 text-[11px]">
+                  <div className="flex-1 min-w-0 text-left">
+                    <span className="font-bold text-neutral-400 mr-2">{res.id}</span>
+                    <span className="font-bold text-white">{res.name}</span>
+                    <p className="text-[10px] text-neutral-400 mt-0.5 font-mono leading-tight">{res.message}</p>
+                    {res.details && (
+                      <span className="inline-block mt-0.5 text-[9px] text-neutral-500 font-mono italic">Details: {res.details}</span>
+                    )}
+                  </div>
+                  <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider border shrink-0 ${badgeColor}`}>
+                    {res.status}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </section>
+  );
+
+  const destructiveModule = (
+    <section className="bg-neutral-900 border border-neutral-800 rounded p-4 flex flex-col gap-3">
+      <div className="flex items-center justify-between">
+        <h3 className="text-xs font-bold text-white uppercase tracking-wider flex items-center gap-2 text-rose-400">
+          <AlertTriangle className="h-4 w-4" />
+          Destructive System Actions
+        </h3>
+        {(isPurging || isNuking) && (
+          <span className="flex items-center gap-1.5 text-[9px] text-amber-400 bg-amber-950/40 border border-amber-800/60 px-2 py-0.5 rounded font-mono uppercase tracking-wider">
+            <RefreshCw className="h-3 w-3 animate-spin" />
+            Executing
+          </span>
+        )}
+      </div>
+
+      <div className="bg-neutral-950 border border-neutral-800/80 rounded p-3 text-xs space-y-2 font-mono">
+        <div className="flex flex-col gap-1">
+          <div className="flex items-center justify-between">
+            <span className="text-[10px] uppercase font-bold text-neutral-400">Action: Purge Agent Memory</span>
+            <span className="text-[9px] text-amber-500/80 uppercase">Target: {agentId}</span>
+          </div>
+          <p className="text-[10px] text-neutral-500 leading-relaxed">
+            Deletes all vector nodes and relationship edges strictly for active workspace <span className="text-neutral-300 font-bold">{agentId}</span>. Other agents remain unaffected.
+          </p>
+        </div>
+        <button
+          onClick={clearAgentMemory}
+          disabled={isPurging || isNuking}
+          className="w-full bg-amber-950/30 hover:bg-amber-900/60 text-amber-400 hover:text-amber-200 border border-amber-800/60 px-3 py-1.5 rounded font-mono text-[11px] font-bold uppercase tracking-wider transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 cursor-pointer"
+        >
+          {isPurging ? (
+            <>
+              <RefreshCw className="h-3.5 w-3.5 animate-spin text-amber-200" />
+              <span>Purging Agent Memory...</span>
+            </>
+          ) : (
+            <>
+              <Trash2 className="h-3.5 w-3.5 text-amber-400" />
+              <span>Purge Agent Memory ({agentId})</span>
+            </>
+          )}
+        </button>
+      </div>
+
+      <div className="bg-rose-950/20 border border-rose-900/50 rounded p-3 text-xs space-y-2 font-mono">
+        <div className="flex flex-col gap-1">
+          <div className="flex items-center justify-between">
+            <span className="text-[10px] uppercase font-bold text-rose-400">Action: Whole-Vault Nuke</span>
+            <span className="text-[9px] text-rose-500 uppercase font-bold">ALL AGENTS</span>
+          </div>
+          <p className="text-[10px] text-neutral-400 leading-relaxed">
+            Permanently destroys and drops the entire <span className="text-rose-300 font-semibold">mythos_vault</span> database across all workspaces, resets all tables, and reboots an empty store.
+          </p>
+        </div>
+        <button
+          id="nukeTrigger"
+          onClick={nukeWholeVault}
+          disabled={isPurging || isNuking}
+          className="w-full bg-rose-950/40 hover:bg-rose-900/80 text-rose-300 hover:text-white border border-rose-800 px-3 py-1.5 rounded font-mono text-[11px] font-bold uppercase tracking-wider transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 cursor-pointer"
+        >
+          {isNuking ? (
+            <>
+              <RefreshCw className="h-3.5 w-3.5 animate-spin text-red-200" />
+              <span>Nuking Vault Database...</span>
+            </>
+          ) : (
+            <>
+              <AlertTriangle className="h-3.5 w-3.5 text-red-400" />
+              <span>Nuke Vault</span>
+            </>
+          )}
+        </button>
+      </div>
+    </section>
+  );
+
   return (
     <div className="min-h-screen bg-neutral-950 text-neutral-200 font-mono flex flex-col antialiased">
       {/* 1. Terminal Top Banner */}
@@ -713,13 +1056,56 @@ export default function App() {
         </div>
       </header>
 
-      {/* Main Panel Content Grid */}
-      <main className="flex-1 p-6 grid grid-cols-1 lg:grid-cols-12 gap-6 max-w-7xl mx-auto w-full">
-        {/* Left Column (8 cols): Storage, Ingest, Graph operations */}
-        <div className="lg:col-span-8 flex flex-col gap-6">
-          
-          {/* Live Telemetry Overview */}
-          <div className="bg-neutral-900 border border-neutral-800 p-4 rounded grid grid-cols-2 md:grid-cols-4 gap-4">
+      {/* 2. Navigation Bar */}
+      <NavBar
+        activeTab={activeNavTab}
+        onSelectTab={setActiveNavTab}
+        stats={stats}
+        activeAgentId={agentId}
+      />
+
+      {/* Main Content Area */}
+      {activeNavTab === 'monolithic' ? (
+        <main className="flex-1 flex flex-col w-full">
+          <MonolithicView
+            factory={factory}
+            store={store}
+            provider={provider}
+            agentId={agentId}
+            setAgentId={(newId) => {
+              const selected = getCanonicalAgentById(newId);
+              const nextId = selected ? selected.id : newId;
+              const nextHandle = selected ? selected.handle : newId.replace(/^agent-/, '');
+              setAgentId(nextId);
+              setAgentHandle(nextHandle);
+              setSelectedRecord(null);
+              setLastRunResults(null);
+              setLastImportResults(null);
+              refreshExplorer();
+            }}
+            agentHandle={agentHandle}
+            setAgentHandle={setAgentHandle}
+            stats={stats}
+            refreshStats={refreshExplorer}
+            onRunTestMatrix={() => {
+              setActiveNavTab('test-matrix');
+              handleRunTestSuite();
+            }}
+            onPurgeAgent={clearAgentMemory}
+            onNukeVault={nukeWholeVault}
+            customApiKeys={customApiKeys}
+            setCustomApiKeys={setCustomApiKeys}
+          />
+        </main>
+      ) : (
+        <main className="flex-1 p-6 grid grid-cols-1 lg:grid-cols-12 gap-6 max-w-7xl mx-auto w-full">
+          {/* Left Column (8 cols): Storage, Ingest, Graph operations */}
+          <div className="lg:col-span-8 flex flex-col gap-6">
+            
+            {/* Live Telemetry Overview & Canonical Dossier */}
+            {(activeNavTab === 'all' || activeNavTab === 'workspace') && (
+              <>
+                <div className="bg-neutral-900 border border-neutral-800 p-4 rounded grid grid-cols-2 md:grid-cols-4 gap-4">
             <div>
               <p className="text-[10px] text-neutral-500 uppercase tracking-widest">Active Workspace</p>
               <p className="text-sm font-bold text-white mt-1 uppercase tracking-wide">{agentId}</p>
@@ -818,8 +1204,13 @@ export default function App() {
               </div>
             );
           })()}
+              </>
+            )}
 
-          {/* Module A: Source Memory Ingestion Console */}
+            {/* Ingestion & Graph Operations */}
+            {(activeNavTab === 'all' || activeNavTab === 'ingest') && (
+              <>
+                {/* Module A: Source Memory Ingestion Console */}
           <section className="bg-neutral-900 border border-neutral-800 rounded flex flex-col">
             <div className="border-b border-neutral-800 px-4 py-3 flex items-center justify-between bg-neutral-900/60">
               <div className="flex items-center space-x-2">
@@ -1066,9 +1457,12 @@ export default function App() {
               )}
             </div>
           </section>
+              </>
+            )}
 
-          {/* Module D: Lorepack Database Explorer */}
-          <section className="bg-neutral-900 border border-neutral-800 rounded flex flex-col min-h-[350px]">
+            {/* Module D: Lorepack Database Explorer */}
+            {(activeNavTab === 'all' || activeNavTab === 'explorer') && (
+              <section className="bg-neutral-900 border border-neutral-800 rounded flex flex-col min-h-[350px]">
             <div className="border-b border-neutral-800 px-4 py-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 bg-neutral-900/60">
               <div className="flex items-center space-x-2">
                 <Database className="h-4 w-4 text-emerald-400" />
@@ -1255,42 +1649,29 @@ export default function App() {
               </div>
             </div>
           </section>
+            )}
 
-        </div>
+            {/* Module F & G: Transport & Keys (when in transport tab) */}
+            {activeNavTab === 'transport' && (
+              <>
+                {transportModule}
+                {apiKeysModule}
+              </>
+            )}
+
+            {/* MVP Core Function Test Matrix (when in test-matrix tab) */}
+            {activeNavTab === 'test-matrix' && testMatrixModule}
+
+          </div>
 
         {/* Right Column (4 cols): System Log & Transport Archive operations */}
         <div className="lg:col-span-4 flex flex-col gap-6">
 
           {/* Module E: System Console Telemetry Logs */}
-          <section className="bg-neutral-900 border border-neutral-800 rounded flex flex-col h-[320px]">
-            <div className="border-b border-neutral-800 px-4 py-3 flex items-center justify-between bg-neutral-900/60">
-              <div className="flex items-center space-x-2">
-                <Terminal className="h-4 w-4 text-emerald-400" />
-                <h2 className="text-xs font-bold text-white uppercase tracking-wider">Hardware Process Logs</h2>
-              </div>
-              <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
-            </div>
-
-            <div className="p-3 bg-neutral-950 font-mono text-[10px] overflow-y-auto flex-1 flex flex-col-reverse divide-y divide-neutral-900/50">
-              {systemLog.map((logStr, index) => {
-                let colorClass = 'text-neutral-400';
-                if (logStr.includes('[ERROR]')) colorClass = 'text-rose-400';
-                if (logStr.includes('[CRITICAL]')) colorClass = 'text-red-500 font-bold';
-                if (logStr.includes('[INGEST]')) colorClass = 'text-emerald-400';
-                if (logStr.includes('[CONVERSE]')) colorClass = 'text-teal-400';
-                if (logStr.includes('[GRAPH]')) colorClass = 'text-blue-400';
-                if (logStr.includes('[EXPORT]') || logStr.includes('[IMPORT]')) colorClass = 'text-purple-400';
-
-                return (
-                  <div key={index} className={`py-1 ${colorClass}`}>
-                    {logStr}
-                  </div>
-                );
-              })}
-            </div>
-          </section>
+          {processLogsModule}
 
           {/* Module G: API Key Load Balancer Pool Manager */}
+          {activeNavTab === 'all' && (
           <section className="bg-neutral-900 border border-neutral-800 rounded flex flex-col">
             <div className="border-b border-neutral-800 px-4 py-3 flex items-center justify-between bg-neutral-900/60">
               <div className="flex items-center space-x-2">
@@ -1350,8 +1731,10 @@ export default function App() {
               )}
             </div>
           </section>
+          )}
 
           {/* Module F: Lorepack Archive Transport (Import/Export) */}
+          {activeNavTab === 'all' && (
           <section className="bg-neutral-900 border border-neutral-800 rounded flex flex-col">
             <div className="border-b border-neutral-800 px-4 py-3 flex items-center justify-between bg-neutral-900/60">
               <div className="flex items-center space-x-2">
@@ -1463,8 +1846,10 @@ export default function App() {
               )}
             </div>
           </section>
+          )}
 
           {/* MVP Core Function Test Matrix Module */}
+          {activeNavTab === 'all' && (
           <section className="bg-neutral-900 border border-neutral-800 rounded flex flex-col">
             <div className="border-b border-neutral-800 px-4 py-3 flex items-center justify-between bg-neutral-900/60">
               <div className="flex items-center space-x-2">
@@ -1518,8 +1903,10 @@ export default function App() {
               )}
             </div>
           </section>
+          )}
 
           {/* Clean Store / Workspace Reset Module */}
+          {(activeNavTab === 'all' || activeNavTab === 'transport') && (
           <section className="bg-neutral-900 border border-neutral-800 rounded p-4 flex flex-col gap-3">
             <div className="flex items-center justify-between">
               <h3 className="text-xs font-bold text-white uppercase tracking-wider flex items-center gap-2 text-rose-400">
@@ -1626,6 +2013,7 @@ export default function App() {
               </button>
             </div>
           </section>
+          )}
 
           {/* Monolithic Compatibility Elements */}
           <div id="nukeModal" style={{ display: 'none' }}>
@@ -1635,6 +2023,7 @@ export default function App() {
 
         </div>
       </main>
+      )}
 
       {/* Floating Global Feedback Notification Toast for High-Visibility System Feedback */}
       {destructiveFeedback && (
