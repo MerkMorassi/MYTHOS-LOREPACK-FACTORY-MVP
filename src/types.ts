@@ -30,8 +30,10 @@ export interface TripletEdge {
 }
 
 export interface LorepackModel {
-  getEmbeddings(text: string): Promise<number[] | null | undefined>;
-  extractTripletsFromText(text: string): Promise<Triplet[]>;
+  getEmbeddings(text: string, keys?: string[]): Promise<number[] | null | undefined>;
+  getEmbeddingsBatch?(texts: string[], keys?: string[]): Promise<number[][]>;
+  extractTripletsFromText(text: string, keys?: string[]): Promise<Triplet[]>;
+  generateText?(prompt: string, systemPrompt?: string, modelName?: string, keys?: string[]): Promise<string>;
 }
 
 export interface LorepackStore {
@@ -41,10 +43,15 @@ export interface LorepackStore {
   addTripletEdges(edges: TripletEdge[]): Promise<void>;
   getTripletEdgesByAgent(agentId: string): Promise<TripletEdge[]>;
   getAllTripletEdges(): Promise<TripletEdge[]>;
+  addRecordsAtomic(vectors: VectorRecord[], edges: TripletEdge[]): Promise<void>;
+  clearAgent(agentId: string): Promise<{ vectors: number; edges: number }>;
+  nukeStore(): Promise<void>;
 }
 
 export interface ImportProgress {
   processed: number;
   vectors: number;
   edges: number;
+  rejected?: number;
 }
+
