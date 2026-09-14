@@ -51,9 +51,10 @@ export default function App() {
   const [customApiKeys, setCustomApiKeys] = useState<string[]>([]);
   const [newKeyInput, setNewKeyInput] = useState<string>('');
 
-  // Selection (Canonical 15 MythOS Agent Roster)
+  // Selection (Canonical 16 MythOS Agent Roster)
   const [agentId, setAgentId] = useState<string>(DEFAULT_CANONICAL_AGENT.id);
   const [agentHandle, setAgentHandle] = useState<string>(DEFAULT_CANONICAL_AGENT.handle);
+  const [showAgentDetails, setShowAgentDetails] = useState<boolean>(false);
   const [stats, setStats] = useState<{ totalNodes: number; totalEdges: number }>({ totalNodes: 0, totalEdges: 0 });
 
   // Core Test Suite State
@@ -687,8 +688,8 @@ export default function App() {
               className="bg-transparent text-xs text-white border-none focus:outline-none focus:ring-0 uppercase font-mono cursor-pointer"
             >
               {CANONICAL_MYTHOS_AGENTS.map((agent) => (
-                <option key={agent.id} value={agent.id} className="bg-neutral-900">
-                  {agent.order}. {agent.name} ({agent.id})
+                <option key={agent.id} value={agent.id} className="bg-neutral-900 text-neutral-200">
+                  [{agent.port}] {agent.id} — {agent.handle} ({agent.role.split(':')[0]})
                 </option>
               ))}
             </select>
@@ -739,6 +740,84 @@ export default function App() {
               </p>
             </div>
           </div>
+
+          {/* Canonical Agent Specification Dossier */}
+          {(() => {
+            const activeAgent = getCanonicalAgentById(agentId) || DEFAULT_CANONICAL_AGENT;
+            return (
+              <div className="bg-neutral-900 border border-neutral-800 rounded p-4 flex flex-col gap-3">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-neutral-800 pb-3">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="px-2 py-0.5 rounded bg-emerald-950/80 border border-emerald-800 text-[11px] font-mono font-bold text-emerald-400">
+                      PORT {activeAgent.port}
+                    </span>
+                    <span className="text-sm font-bold text-white tracking-wide">
+                      {activeAgent.handle} ({activeAgent.id})
+                    </span>
+                    <span className="text-xs text-neutral-400">
+                      — {activeAgent.role}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2 self-start sm:self-auto">
+                    <span className="text-[10px] font-mono text-neutral-500 bg-neutral-950 px-2 py-0.5 border border-neutral-800 rounded">
+                      rev: {activeAgent.revision}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setShowAgentDetails(!showAgentDetails)}
+                      className="text-[10px] uppercase font-bold tracking-wider px-2.5 py-1 bg-neutral-800 hover:bg-neutral-700 text-neutral-300 rounded transition-colors"
+                    >
+                      {showAgentDetails ? 'Hide Instructions' : 'View Instructions'}
+                    </button>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
+                  <div className="bg-neutral-950 p-2.5 rounded border border-neutral-800/80">
+                    <span className="text-[10px] uppercase tracking-wider text-neutral-500 block font-semibold mb-1">
+                      Persona Tone
+                    </span>
+                    <p className="text-neutral-300 italic text-[11px] leading-relaxed">
+                      &ldquo;{activeAgent.meta.tone}&rdquo;
+                    </p>
+                  </div>
+                  <div className="bg-neutral-950 p-2.5 rounded border border-neutral-800/80">
+                    <span className="text-[10px] uppercase tracking-wider text-neutral-500 block font-semibold mb-1">
+                      Lore Policy
+                    </span>
+                    <div className="text-neutral-300 font-mono text-[11px] space-y-0.5">
+                      <div><span className="text-emerald-400 font-semibold">READ:</span> [{activeAgent.lore_policy.read.join(', ')}]</div>
+                      <div><span className="text-blue-400 font-semibold">WRITE:</span> [{activeAgent.lore_policy.write.join(', ')}]</div>
+                    </div>
+                  </div>
+                  <div className="bg-neutral-950 p-2.5 rounded border border-neutral-800/80">
+                    <span className="text-[10px] uppercase tracking-wider text-neutral-500 block font-semibold mb-1">
+                      Architectural Constraints
+                    </span>
+                    <ul className="text-[11px] text-neutral-300 list-disc list-inside space-y-0.5">
+                      {activeAgent.meta.constraints.map((c, i) => (
+                        <li key={i} className="truncate" title={c}>{c}</li>
+                      ))}
+                    </ul>
+                  </div>
+                </div>
+
+                {showAgentDetails && (
+                  <div className="bg-neutral-950 p-3.5 rounded border border-neutral-800 text-xs flex flex-col gap-2">
+                    <span className="text-[10px] uppercase tracking-wider text-neutral-400 font-bold">
+                      System Instruction Prompt
+                    </span>
+                    <pre className="text-[11px] text-neutral-300 whitespace-pre-wrap font-mono bg-neutral-900 p-3 rounded border border-neutral-800 leading-relaxed">
+                      {activeAgent.system_instruction}
+                    </pre>
+                    <p className="text-[10px] text-neutral-500 italic">
+                      {activeAgent.meta.description}
+                    </p>
+                  </div>
+                )}
+              </div>
+            );
+          })()}
 
           {/* Module A: Source Memory Ingestion Console */}
           <section className="bg-neutral-900 border border-neutral-800 rounded flex flex-col">
