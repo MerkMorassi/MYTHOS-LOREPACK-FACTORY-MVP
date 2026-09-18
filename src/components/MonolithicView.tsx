@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
+import { Lock } from 'lucide-react';
 import { LorepackFactory } from '../lorepack-factory.ts';
 import { IndexedDbLorepackStore } from '../indexeddb-store.ts';
 import { GeminiProvider } from '../providers/gemini-provider.ts';
@@ -84,6 +85,7 @@ export const MonolithicView: React.FC<MonolithicViewProps> = ({
   // Hyperparameters
   const [showEmbeddingModel, setShowEmbeddingModel] = useState<boolean>(false);
   const [showOperations, setShowOperations] = useState<boolean>(true);
+  const [isParametersLocked, setIsParametersLocked] = useState<boolean>(false);
   const [embeddingModel] = useState<string>('gemini-embedding-2');
   const [batchSize, setBatchSize] = useState<number>(40);
   const [lanesPerKey, setLanesPerKey] = useState<number>(2);
@@ -193,6 +195,7 @@ export const MonolithicView: React.FC<MonolithicViewProps> = ({
     // Sync keys
     const newKeys = [k1, k2, k3].map((k) => k.trim()).filter((k) => k.length > 0);
     setCustomApiKeys(newKeys);
+    setIsParametersLocked(true);
     addLog(
       `Parameters locked: Model=${generationModel}, ChunkSize=${chunkSize}, Threshold=${graphThreshold}, KeysActive=${newKeys.length}`,
       'KERNEL',
@@ -467,14 +470,14 @@ export const MonolithicView: React.FC<MonolithicViewProps> = ({
 
   return (
     <div
-      className="w-full flex-1 flex flex-col font-mono text-[#e6e6e6] bg-[#0b0b0b] min-h-[calc(100vh-120px)] select-text"
+      className="w-full flex-1 min-h-0 flex flex-col font-mono text-[#e6e6e6] bg-[#0b0b0b] overflow-hidden select-text"
       style={{
         fontFamily:
           'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
       }}
     >
       {/* 1. Header Bar matching monolithic style */}
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center px-4 py-3 bg-[#0f0f0f] border-b border-[#2a2a2a] gap-2">
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center px-4 py-2 bg-[#0f0f0f] border-b border-[#2a2a2a] gap-2 shrink-0">
         <div className="font-extrabold tracking-wider text-sm flex items-center gap-2">
           <span>MYTHOS</span>
           <span className="text-[#8a8a8a]">//</span>
@@ -505,9 +508,9 @@ export const MonolithicView: React.FC<MonolithicViewProps> = ({
       </div>
 
       {/* 2. Main 2-Column Monolithic Grid */}
-      <div className="flex-1 grid grid-cols-1 lg:grid-cols-[360px_1fr] min-h-0">
+      <div className="flex-1 grid grid-cols-1 lg:grid-cols-[360px_1fr] min-h-0 overflow-hidden">
         {/* Left Column: CONTROL SURFACE */}
-        <div className="bg-[#121212] border-b lg:border-b-0 lg:border-r border-[#2a2a2a] p-3 flex flex-col gap-2.5 overflow-y-auto max-h-[85vh] lg:max-h-none">
+        <div className="bg-[#121212] border-b lg:border-b-0 lg:border-r border-[#2a2a2a] p-3 flex flex-col gap-2 overflow-y-auto min-h-0 h-full">
           {/* Agent ID Input / Select Collapsible */}
           <div className="border border-[#2a2a2a] bg-[#161616] p-2.5 flex flex-col gap-2 rounded-none">
             <label
@@ -526,6 +529,7 @@ export const MonolithicView: React.FC<MonolithicViewProps> = ({
                     if (found) {
                       setAgentId(found.id);
                       setAgentHandle(found.handle);
+                      setIsParametersLocked(false);
                       addLog(`Switched active agent to ${found.name} (Port ${found.port})`, 'SYS', 'ok');
                     }
                   }}
@@ -565,7 +569,10 @@ export const MonolithicView: React.FC<MonolithicViewProps> = ({
                 <select
                   id="modelSelect"
                   value={generationModel}
-                  onChange={(e) => setGenerationModel(e.target.value)}
+                  onChange={(e) => {
+                    setGenerationModel(e.target.value);
+                    setIsParametersLocked(false);
+                  }}
                   className="w-full bg-[#1f1f1f] border border-[#3a3a3a] text-[#e6e6e6] px-2.5 py-1.5 text-xs focus:border-[#ff3300] outline-none rounded-none cursor-pointer"
                 >
                   {availableModels.map((model) => (
@@ -593,13 +600,19 @@ export const MonolithicView: React.FC<MonolithicViewProps> = ({
                   id="systemPrompt"
                   rows={4}
                   value={systemPrompt}
-                  onChange={(e) => setSystemPrompt(e.target.value)}
+                  onChange={(e) => {
+                    setSystemPrompt(e.target.value);
+                    setIsParametersLocked(false);
+                  }}
                   className="w-full bg-[#1f1f1f] border border-[#3a3a3a] text-[#e6e6e6] p-2 text-xs focus:border-[#ff3300] outline-none rounded-none resize-y"
                   placeholder="System instructions for the agent..."
                 />
                 <button
                   type="button"
-                  onClick={() => setSystemPrompt(activeAgent.system_instruction)}
+                  onClick={() => {
+                    setSystemPrompt(activeAgent.system_instruction);
+                    setIsParametersLocked(false);
+                  }}
                   className="text-[10px] text-[#8a8a8a] hover:text-[#ff3300] self-end underline"
                 >
                   Reset to Canonical Instruction
@@ -625,7 +638,10 @@ export const MonolithicView: React.FC<MonolithicViewProps> = ({
                   id="k1"
                   type="password"
                   value={k1}
-                  onChange={(e) => setK1(e.target.value)}
+                  onChange={(e) => {
+                    setK1(e.target.value);
+                    setIsParametersLocked(false);
+                  }}
                   placeholder="KEY 1 (Gemini API)"
                   className="w-full bg-[#1f1f1f] border border-[#3a3a3a] text-[#e6e6e6] px-2.5 py-1.5 text-xs focus:border-[#ff3300] outline-none rounded-none font-mono"
                   autoComplete="off"
@@ -634,7 +650,10 @@ export const MonolithicView: React.FC<MonolithicViewProps> = ({
                   id="k2"
                   type="password"
                   value={k2}
-                  onChange={(e) => setK2(e.target.value)}
+                  onChange={(e) => {
+                    setK2(e.target.value);
+                    setIsParametersLocked(false);
+                  }}
                   placeholder="KEY 2 (Gemini API)"
                   className="w-full bg-[#1f1f1f] border border-[#3a3a3a] text-[#e6e6e6] px-2.5 py-1.5 text-xs focus:border-[#ff3300] outline-none rounded-none font-mono"
                   autoComplete="off"
@@ -643,7 +662,10 @@ export const MonolithicView: React.FC<MonolithicViewProps> = ({
                   id="k3"
                   type="password"
                   value={k3}
-                  onChange={(e) => setK3(e.target.value)}
+                  onChange={(e) => {
+                    setK3(e.target.value);
+                    setIsParametersLocked(false);
+                  }}
                   placeholder="KEY 3 (Gemini API)"
                   className="w-full bg-[#1f1f1f] border border-[#3a3a3a] text-[#e6e6e6] px-2.5 py-1.5 text-xs focus:border-[#ff3300] outline-none rounded-none font-mono"
                   autoComplete="off"
@@ -671,7 +693,10 @@ export const MonolithicView: React.FC<MonolithicViewProps> = ({
                       min={1}
                       max={100}
                       value={batchSize}
-                      onChange={(e) => setBatchSize(Number(e.target.value))}
+                      onChange={(e) => {
+                        setBatchSize(Number(e.target.value));
+                        setIsParametersLocked(false);
+                      }}
                       className="w-full bg-[#1f1f1f] border border-[#3a3a3a] text-[#e6e6e6] px-2.5 py-1.5 text-xs focus:border-[#ff3300] outline-none rounded-none"
                     />
                   </div>
@@ -682,7 +707,10 @@ export const MonolithicView: React.FC<MonolithicViewProps> = ({
                       min={1}
                       max={10}
                       value={lanesPerKey}
-                      onChange={(e) => setLanesPerKey(Number(e.target.value))}
+                      onChange={(e) => {
+                        setLanesPerKey(Number(e.target.value));
+                        setIsParametersLocked(false);
+                      }}
                       className="w-full bg-[#1f1f1f] border border-[#3a3a3a] text-[#e6e6e6] px-2.5 py-1.5 text-xs focus:border-[#ff3300] outline-none rounded-none"
                     />
                   </div>
@@ -696,7 +724,10 @@ export const MonolithicView: React.FC<MonolithicViewProps> = ({
                       min={100}
                       max={10000}
                       value={chunkSize}
-                      onChange={(e) => setChunkSize(Number(e.target.value))}
+                      onChange={(e) => {
+                        setChunkSize(Number(e.target.value));
+                        setIsParametersLocked(false);
+                      }}
                       className="w-full bg-[#1f1f1f] border border-[#3a3a3a] text-[#e6e6e6] px-2.5 py-1.5 text-xs focus:border-[#ff3300] outline-none rounded-none"
                     />
                   </div>
@@ -708,7 +739,10 @@ export const MonolithicView: React.FC<MonolithicViewProps> = ({
                       max={1}
                       step={0.01}
                       value={graphThreshold}
-                      onChange={(e) => setGraphThreshold(Number(e.target.value))}
+                      onChange={(e) => {
+                        setGraphThreshold(Number(e.target.value));
+                        setIsParametersLocked(false);
+                      }}
                       className="w-full bg-[#1f1f1f] border border-[#3a3a3a] text-[#e6e6e6] px-2.5 py-1.5 text-xs focus:border-[#ff3300] outline-none rounded-none"
                     />
                   </div>
@@ -722,9 +756,10 @@ export const MonolithicView: React.FC<MonolithicViewProps> = ({
             id="saveBtn"
             type="button"
             onClick={handleLockParameters}
-            className="w-full bg-[#1c1c1c] hover:bg-[#222] border border-[#3a3a3a] hover:border-[#ff3300] text-[#e6e6e6] py-2 px-3 text-xs font-black uppercase tracking-wider transition-colors cursor-pointer rounded-none"
+            className="w-full bg-[#1c1c1c] hover:bg-[#222] border border-[#3a3a3a] hover:border-[#ff3300] text-[#e6e6e6] py-2 px-3 text-xs font-black uppercase tracking-wider transition-colors cursor-pointer rounded-none flex items-center justify-center gap-2 text-center shrink-0"
           >
-            LOCK PARAMETERS
+            <Lock className={`w-3.5 h-3.5 transition-colors ${isParametersLocked ? 'text-[#00ff41]' : 'text-[#ff3300]'}`} />
+            <span>LOCK LORE PARAMETERS</span>
           </button>
 
           <hr className="border-t border-[#2a2a2a] my-1" />
@@ -864,43 +899,43 @@ export const MonolithicView: React.FC<MonolithicViewProps> = ({
         </div>
 
         {/* Right Column: DASHBOARD & TERMINAL CONSOLE */}
-        <div className="bg-[#0b0b0b] p-3 flex flex-col gap-2.5 overflow-hidden">
+        <div className="bg-[#0b0b0b] p-3 flex flex-col gap-2 overflow-hidden min-h-0 h-full">
           {/* Stats Grid */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
-            <div className="border border-[#2a2a2a] bg-[#121212] p-2.5 flex flex-col gap-1 rounded-none">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 shrink-0">
+            <div className="border border-[#2a2a2a] bg-[#121212] p-2 flex flex-col gap-0.5 rounded-none">
               <span className="text-[10px] text-[#8a8a8a] uppercase tracking-wider">
                 TOTAL RECORDS
               </span>
-              <span id="statVectors" className="text-xl font-black text-[#ff3300] tracking-tight">
+              <span id="statVectors" className="text-lg font-black text-[#ff3300] tracking-tight">
                 {stats.totalNodes}
               </span>
             </div>
 
-            <div className="border border-[#2a2a2a] bg-[#121212] p-2.5 flex flex-col gap-1 rounded-none">
+            <div className="border border-[#2a2a2a] bg-[#121212] p-2 flex flex-col gap-0.5 rounded-none">
               <span className="text-[10px] text-[#8a8a8a] uppercase tracking-wider">
                 TRIPLET EDGES
               </span>
-              <span className="text-xl font-black text-[#00ff41] tracking-tight">
+              <span className="text-lg font-black text-[#00ff41] tracking-tight">
                 {stats.totalEdges}
               </span>
             </div>
 
-            <div className="border border-[#2a2a2a] bg-[#121212] p-2.5 flex flex-col gap-1 rounded-none">
+            <div className="border border-[#2a2a2a] bg-[#121212] p-2 flex flex-col gap-0.5 rounded-none">
               <span className="text-[10px] text-[#8a8a8a] uppercase tracking-wider">
                 STAGED
               </span>
-              <span id="statChunks" className="text-xl font-black text-[#e6e6e6] tracking-tight">
+              <span id="statChunks" className="text-lg font-black text-[#e6e6e6] tracking-tight">
                 {stagedFiles.length}
               </span>
             </div>
 
-            <div className="border border-[#2a2a2a] bg-[#121212] p-2.5 flex flex-col gap-1 rounded-none">
+            <div className="border border-[#2a2a2a] bg-[#121212] p-2 flex flex-col gap-0.5 rounded-none">
               <span className="text-[10px] text-[#8a8a8a] uppercase tracking-wider">
                 STATE
               </span>
               <span
                 id="statState"
-                className={`text-xl font-black tracking-tight ${
+                className={`text-lg font-black tracking-tight ${
                   runtimeState === 'ERROR' ? 'text-[#ff3366]' : runtimeState === 'IDLE' ? 'text-[#00ff41]' : 'text-[#ffaa00]'
                 }`}
               >
@@ -910,7 +945,7 @@ export const MonolithicView: React.FC<MonolithicViewProps> = ({
           </div>
 
           {/* Console Header Bar */}
-          <div className="flex justify-between items-center text-xs text-[#8a8a8a] pt-1">
+          <div className="flex justify-between items-center text-xs text-[#8a8a8a] shrink-0">
             <div className="flex items-center gap-2">
               <span className="uppercase tracking-wider">RECORDS IN SCOPE:</span>
               <span id="statVectorsLog" className="text-white font-bold font-mono">
@@ -935,7 +970,7 @@ export const MonolithicView: React.FC<MonolithicViewProps> = ({
           <div
             id="logConsole"
             ref={logConsoleRef}
-            className="flex-1 bg-[#121212] border border-[#2a2a2a] p-3 overflow-y-auto text-xs leading-relaxed min-h-[260px] font-mono select-text"
+            className="flex-1 bg-[#121212] border border-[#2a2a2a] p-2.5 overflow-y-auto text-xs leading-relaxed min-h-0 font-mono select-text"
           >
             {logs.length === 0 ? (
               <div className="text-[#555] italic">Terminal log is empty. Execute a command or ingest lore.</div>
@@ -963,7 +998,7 @@ export const MonolithicView: React.FC<MonolithicViewProps> = ({
           </div>
 
           {/* Linear Progress Bar */}
-          <div className="h-2.5 border border-[#2a2a2a] bg-[#111] overflow-hidden rounded-none">
+          <div className="h-2 border border-[#2a2a2a] bg-[#111] overflow-hidden rounded-none shrink-0">
             <div
               id="progressBar"
               className="h-full bg-[#ff3300] transition-all duration-150"
@@ -972,7 +1007,7 @@ export const MonolithicView: React.FC<MonolithicViewProps> = ({
           </div>
 
           {/* Command Oracle Terminal Input */}
-          <div className="flex gap-2 items-stretch pt-1">
+          <div className="flex gap-2 items-stretch shrink-0">
             <textarea
               id="chatInput"
               rows={1}
@@ -985,14 +1020,14 @@ export const MonolithicView: React.FC<MonolithicViewProps> = ({
                 }
               }}
               placeholder="Command Oracle."
-              className="flex-1 bg-[#1f1f1f] border border-[#3a3a3a] text-[#e6e6e6] px-3 py-2 text-xs focus:border-[#ff3300] outline-none rounded-none resize-none font-mono"
+              className="flex-1 bg-[#1f1f1f] border border-[#3a3a3a] text-[#e6e6e6] px-3 py-1.5 text-xs focus:border-[#ff3300] outline-none rounded-none resize-none font-mono"
             />
             <button
               id="sendBtn"
               type="button"
               disabled={oracleBusy || !chatInput.trim()}
               onClick={handleSendOracle}
-              className="bg-[#1c1c1c] hover:bg-[#222] border border-[#3a3a3a] hover:border-[#ff3300] text-[#e6e6e6] disabled:opacity-40 px-6 py-2 text-xs font-black uppercase tracking-wider transition-colors cursor-pointer rounded-none flex items-center justify-center"
+              className="bg-[#1c1c1c] hover:bg-[#222] border border-[#3a3a3a] hover:border-[#ff3300] text-[#e6e6e6] disabled:opacity-40 px-5 py-1.5 text-xs font-black uppercase tracking-wider transition-colors cursor-pointer rounded-none flex items-center justify-center shrink-0"
             >
               {oracleBusy ? 'WAIT...' : 'SEND'}
             </button>

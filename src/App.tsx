@@ -1049,36 +1049,36 @@ export default function App() {
   );
 
   return (
-    <div className="min-h-screen bg-neutral-950 text-neutral-200 font-mono flex flex-col antialiased">
+    <div className="h-screen max-h-screen bg-neutral-950 text-neutral-200 font-mono flex flex-col antialiased overflow-hidden">
       {/* 1. Terminal Top Banner */}
-      <header className="border-b border-neutral-800 bg-neutral-900/95 px-6 py-4 flex flex-col md:flex-row items-start md:items-center justify-between gap-4 sticky top-0 z-50 backdrop-blur-md">
+      <header className="border-b border-neutral-800 bg-neutral-900/95 px-4 py-2 flex flex-col md:flex-row items-start md:items-center justify-between gap-2 shrink-0 z-50 backdrop-blur-md">
         <div className="flex items-center space-x-3">
-          <Terminal className="h-6 w-6 text-emerald-500 animate-pulse" />
+          <Terminal className="h-5 w-5 text-emerald-500 animate-pulse" />
           <div>
-            <h1 className="text-sm font-bold tracking-wider text-white uppercase flex items-center gap-2">
+            <h1 className="text-xs font-bold tracking-wider text-white uppercase flex items-center gap-2">
               MYTHOS LOREPACK ENGINE
-              <span className="text-[10px] bg-neutral-800 border border-neutral-700 text-neutral-400 px-1.5 py-0.5 rounded uppercase tracking-widest">v2.1</span>
+              <span className="text-[9px] bg-neutral-800 border border-neutral-700 text-neutral-400 px-1 py-0.5 rounded uppercase tracking-widest">v2.1</span>
             </h1>
-            <p className="text-[10px] text-neutral-500 mt-0.5 uppercase tracking-wide">
+            <p className="text-[9px] text-neutral-500 uppercase tracking-wide">
               Secure Local-First Cognitive Storage Terminal
             </p>
           </div>
         </div>
 
         {/* Global Hardware Status Bars */}
-        <div className="flex flex-wrap items-center gap-3">
-          <div className="flex items-center space-x-2 bg-neutral-950 px-3 py-1.5 border border-neutral-800 rounded text-xs">
-            <Database className="h-3.5 w-3.5 text-neutral-500" />
-            <span className="text-[10px] text-neutral-400">DATABASE:</span>
-            <span className={`text-[10px] font-bold ${dbState === 'CONNECTED' ? 'text-emerald-500' : 'text-rose-500'}`}>
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="flex items-center space-x-1.5 bg-neutral-950 px-2.5 py-1 border border-neutral-800 rounded text-xs">
+            <Database className="h-3 w-3 text-neutral-500" />
+            <span className="text-[9px] text-neutral-400">DATABASE:</span>
+            <span className={`text-[9px] font-bold ${dbState === 'CONNECTED' ? 'text-emerald-500' : 'text-rose-500'}`}>
               {dbState}
             </span>
           </div>
 
-          <div className="flex items-center space-x-2 bg-neutral-950 px-3 py-1.5 border border-neutral-800 rounded text-xs">
-            <Cpu className="h-3.5 w-3.5 text-neutral-500" />
-            <span className="text-[10px] text-neutral-400">GEMINI PROVIDER:</span>
-            <span className={`text-[10px] font-bold ${apiState === 'ONLINE' ? 'text-emerald-500' : 'text-amber-500'}`}>
+          <div className="flex items-center space-x-1.5 bg-neutral-950 px-2.5 py-1 border border-neutral-800 rounded text-xs">
+            <Cpu className="h-3 w-3 text-neutral-500" />
+            <span className="text-[9px] text-neutral-400">GEMINI PROVIDER:</span>
+            <span className={`text-[9px] font-bold ${apiState === 'ONLINE' ? 'text-emerald-500' : 'text-amber-500'}`}>
               {apiState}
             </span>
           </div>
@@ -1087,7 +1087,7 @@ export default function App() {
             className="flex items-center justify-center bg-neutral-950 hover:bg-neutral-800 border border-neutral-800 p-1.5 rounded text-neutral-400 hover:text-white transition-colors cursor-pointer"
             title="API Settings"
           >
-            <Settings className="h-4 w-4" />
+            <Settings className="h-3.5 w-3.5" />
           </button>
         </div>
       </header>
@@ -1102,7 +1102,7 @@ export default function App() {
 
       {/* Main Content Area */}
       {activeNavTab === 'monolithic' ? (
-        <main className="flex-1 flex flex-col w-full">
+        <main className="flex-1 min-h-0 flex flex-col w-full overflow-hidden">
           <MonolithicView
             factory={factory}
             store={store}
@@ -1134,14 +1134,16 @@ export default function App() {
           />
         </main>
       ) : activeNavTab === 'graph-view' ? (
-        <NetworkGraphView
-          agents={CANONICAL_MYTHOS_AGENTS}
-          activeAgentId={agentId}
-          store={store}
-          factory={factory}
-        />
+        <main className="flex-1 min-h-0 flex flex-col w-full overflow-hidden">
+          <NetworkGraphView
+            agents={CANONICAL_MYTHOS_AGENTS}
+            activeAgentId={agentId}
+            store={store}
+            factory={factory}
+          />
+        </main>
       ) : (
-        <main className="flex-1 p-6 grid grid-cols-1 lg:grid-cols-12 gap-6 max-w-7xl mx-auto w-full">
+        <main className="flex-1 min-h-0 overflow-y-auto p-6 grid grid-cols-1 lg:grid-cols-12 gap-6 max-w-7xl mx-auto w-full">
           {/* Left Column (8 cols): Storage, Ingest, Graph operations */}
           <div className="lg:col-span-8 flex flex-col gap-6">
             
@@ -2149,7 +2151,7 @@ export default function App() {
       )}
 
       {/* Footer System Parameters */}
-      <footer className="border-t border-neutral-800 bg-neutral-900/50 px-6 py-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 text-[10px] text-neutral-500">
+      <footer className="border-t border-neutral-800 bg-neutral-900/50 px-4 py-1.5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 text-[9px] text-neutral-500 shrink-0">
         <p className="uppercase tracking-widest font-mono">
           SYSTEM ENVIRONMENT: PRODUCTION PREVIEW CONSOLE — ALL SYSTEMS OPERATIONAL
         </p>
