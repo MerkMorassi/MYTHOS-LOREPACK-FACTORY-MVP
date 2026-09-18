@@ -7,6 +7,7 @@ import {
   Archive,
   CheckCircle2,
   LayoutGrid,
+  Share2,
 } from 'lucide-react';
 
 export type AppSectionTab =
@@ -16,6 +17,7 @@ export type AppSectionTab =
   | 'explorer'
   | 'transport'
   | 'test-matrix'
+  | 'graph-view'
   | 'all';
 
 interface NavBarProps {
@@ -60,6 +62,13 @@ export const NavBar: React.FC<NavBarProps> = ({
       label: 'Ingestion & Graph',
       shortLabel: 'Ingest',
       icon: <Layers className="w-3.5 h-3.5 text-neutral-400" />,
+    },
+    {
+      id: 'graph-view',
+      label: 'Semantic Network Graph',
+      shortLabel: 'D3 Graph',
+      icon: <Share2 className="w-3.5 h-3.5 text-purple-400" />,
+      tag: 'D3',
     },
     {
       id: 'explorer',

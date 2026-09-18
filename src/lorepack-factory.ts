@@ -197,7 +197,7 @@ export class LorepackFactory {
   async buildGraphLite(
     agentId: string,
     onProgress?: (current: number, total: number, created: number) => void,
-    modelName = 'gemini-3.8-flash',
+    modelName = 'gemini-3.6-flash',
   ): Promise<number> {
     const nodes = await this.store.getVectorsByAgent(agentId);
     
@@ -220,7 +220,7 @@ export class LorepackFactory {
     for (let offset = 0; offset < nodes.length; offset += batchSize) {
       const batch = nodes.slice(offset, offset + batchSize);
       const counts = await Promise.all(batch.map(async (node) => {
-        const triplets = await this.model.extractTripletsFromText(node.text);
+        const triplets = await this.model.extractTripletsFromText(node.text, modelName);
         if (!triplets.length) return 0;
         const edges: TripletEdge[] = triplets.map((triplet) => ({
           id: crypto.randomUUID(),
@@ -488,7 +488,7 @@ export class LorepackFactory {
     userQuery: string,
     agentId: string,
     systemPrompt?: string,
-    modelName = 'gemini-3.8-flash',
+    modelName = 'gemini-3.6-flash',
     topK = 6,
     threshold = 0.45
   ): Promise<{ response: string; derivation: string; source: string }> {

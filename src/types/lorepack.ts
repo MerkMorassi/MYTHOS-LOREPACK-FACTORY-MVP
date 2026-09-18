@@ -85,7 +85,7 @@ export interface GenerationOptions {
   seed: string;
   cameraAngle: string;
   addLetterbox: boolean;
-  geminiModel: 'gemini-2.5-flash-image' | 'imagen-4.0-generate-001';
+  geminiModel: 'gemini-3.6-flash-image' | 'gemini-3.6-flash' | 'imagen-4.0-generate-001';
   deliveryMethod: 'internal' | 'external';
   engine: 'mythos_sdxl' | 'gemini';
   base64Image?: string;

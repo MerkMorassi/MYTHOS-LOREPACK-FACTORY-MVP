@@ -128,7 +128,7 @@ async function startServer() {
       const ai = getAI();
       const response = await retryWithBackoff(() => 
         ai.models.generateContent({
-          model: 'gemini-3.8-flash',
+          model: 'gemini-3.6-flash',
           contents: `Extract semantic relationship triplets from the following text.
 Each triplet must represent a subject (s), relationship (r), and object (o).
 Only extract meaningful relationships related to factual or contextual narrative.
@@ -174,7 +174,7 @@ ${text}`,
       const ai = getAI();
       const response = await retryWithBackoff(() => 
         ai.models.generateContent({
-          model: model || 'gemini-3.8-flash',
+          model: model || 'gemini-3.6-flash',
           contents: prompt,
           config: systemPrompt ? { systemInstruction: systemPrompt } : undefined,
         })
@@ -184,6 +184,54 @@ ${text}`,
     } catch (error: any) {
       console.error('[Server] Content generation failed:', error);
       res.status(500).json({ error: error.message || 'Failed to generate content' });
+    }
+  });
+
+  // API Route: List Models
+  app.get('/api/lorepack/models', async (req, res) => {
+    try {
+      const apiKey = process.env.GEMINI_API_KEY;
+      if (apiKey) {
+        try {
+          const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`);
+          if (response.ok) {
+            const data = await response.json();
+            const models = data.models || [];
+            const generateModels = models.map((m: any) => m.name.replace('models/', ''));
+            if (generateModels.length > 0) {
+              res.json({ models: generateModels });
+              return;
+            }
+          }
+        } catch (apiErr) {
+          console.warn('[Server] External model fetch error, falling back to default list:', apiErr);
+        }
+      }
+      
+      res.json({
+        models: [
+          'gemini-3.6-flash',
+          'gemini-3.8-flash',
+          'gemini-3-flash-preview',
+          'gemini-3.1-pro-preview',
+          'gemini-2.5-pro',
+          'gemini-1.5-flash',
+          'gemini-1.5-pro'
+        ]
+      });
+    } catch (error: any) {
+      console.error('[Server] Model listing failed:', error);
+      res.json({
+        models: [
+          'gemini-3.6-flash',
+          'gemini-3.8-flash',
+          'gemini-3-flash-preview',
+          'gemini-3.1-pro-preview',
+          'gemini-2.5-pro',
+          'gemini-1.5-flash',
+          'gemini-1.5-pro'
+        ]
+      });
     }
   });
 

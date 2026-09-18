@@ -53,7 +53,17 @@ export const MonolithicView: React.FC<MonolithicViewProps> = ({
   const activeAgent = getCanonicalAgentById(agentId) || CANONICAL_MYTHOS_AGENTS[0];
 
   // Monolithic Control States
-  const [generationModel, setGenerationModel] = useState<string>('gemini-flash-latest');
+  const [generationModel, setGenerationModel] = useState<string>('gemini-3.8-flash');
+  const [availableModels, setAvailableModels] = useState<string[]>([
+    'gemini-3.6-flash',
+    'gemini-3.8-flash',
+    'gemini-3-flash-preview',
+    'gemini-3.1-pro-preview',
+    'gemini-2.5-pro',
+    'gemini-1.5-flash',
+    'gemini-1.5-pro'
+  ]);
+  const [fetchingModels, setFetchingModels] = useState<boolean>(false);
   const [showPrompt, setShowPrompt] = useState<boolean>(false);
   const [systemPrompt, setSystemPrompt] = useState<string>(activeAgent.system_instruction);
   const [showKeys, setShowKeys] = useState<boolean>(false);
@@ -62,6 +72,12 @@ export const MonolithicView: React.FC<MonolithicViewProps> = ({
   const [k1, setK1] = useState<string>(customApiKeys[0] || '');
   const [k2, setK2] = useState<string>(customApiKeys[1] || '');
   const [k3, setK3] = useState<string>(customApiKeys[2] || '');
+
+  useEffect(() => {
+    setK1(customApiKeys[0] || '');
+    setK2(customApiKeys[1] || '');
+    setK3(customApiKeys[2] || '');
+  }, [customApiKeys]);
 
   // Hyperparameters
   const [embeddingModel] = useState<string>('gemini-embedding-2');
@@ -128,6 +144,44 @@ export const MonolithicView: React.FC<MonolithicViewProps> = ({
       msg,
     };
     setLogs((prev) => [...prev, entry]);
+  };
+
+  const handleFetchModels = async () => {
+    if (!provider || !provider.fetchModels) {
+      addLog('ERR: Model fetcher unavailable on provider', 'SYS', 'err');
+      return;
+    }
+    setFetchingModels(true);
+    addLog('Fetching available models from Google AI...', 'SYS', 'sys');
+    try {
+      const models = await provider.fetchModels();
+      if (models && models.length > 0) {
+        setAvailableModels(models);
+        // Default to a recognized flash model if the current one isn't in the list
+        if (!models.includes(generationModel)) {
+           const fallback = models.find(m => m.includes('flash')) || models[0];
+           if (fallback) setGenerationModel(fallback);
+        }
+        addLog(`Successfully retrieved ${models.length} models.`, 'SYS', 'ok');
+      } else {
+        addLog('No generation models found.', 'SYS', 'sys');
+      }
+    } catch (err: any) {
+      addLog(`Failed to fetch models: ${err.message}`, 'SYS', 'err');
+      // If fetching fails entirely (e.g. invalid key or cors), fall back to sensible defaults
+      setAvailableModels([
+        'gemini-3.6-flash',
+        'gemini-3.8-flash',
+        'gemini-3-flash-preview',
+        'gemini-3.1-pro-preview',
+        'gemini-2.5-pro',
+        'gemini-1.5-flash',
+        'gemini-1.5-pro'
+      ]);
+      setGenerationModel('gemini-3.8-flash');
+    } finally {
+      setFetchingModels(false);
+    }
   };
 
   // Lock parameters handler
@@ -263,7 +317,8 @@ export const MonolithicView: React.FC<MonolithicViewProps> = ({
         (curr: number, tot: number, created: number) => {
           setProgress(Math.round((curr / Math.max(1, tot)) * 100));
           addLog(`Synthesizing edge relationships [${curr}/${tot}]: +${created} edges`, 'SYS', 'sys');
-        }
+        },
+        generationModel
       );
 
       setProgress(100);
@@ -381,7 +436,7 @@ export const MonolithicView: React.FC<MonolithicViewProps> = ({
 
       if (provider) {
         const prompt = `User Query: ${text}${contextStr}`;
-        const response = await provider.generateText(prompt, systemPrompt);
+        const response = await provider.generateText(prompt, systemPrompt, generationModel);
         addLog(response, 'AI', 'ai');
       } else {
         // Local simulation if provider not initialized
@@ -450,7 +505,7 @@ export const MonolithicView: React.FC<MonolithicViewProps> = ({
         {/* Left Column: CONTROL SURFACE */}
         <div className="bg-[#121212] border-b lg:border-b-0 lg:border-r border-[#2a2a2a] p-3 flex flex-col gap-2.5 overflow-y-auto max-h-[85vh] lg:max-h-none">
           {/* Agent ID Input / Select */}
-          <div className="flex flex-col gap-1">
+          <div className="border border-[#2a2a2a] bg-[#161616] p-2.5 flex flex-col gap-2 rounded-none">
             <label className="text-[11px] uppercase tracking-wider text-[#8a8a8a] flex justify-between">
               <span>Agent Identity</span>
               <span className="text-[10px] text-[#ff3300]">[{activeAgent.handle}]</span>
@@ -465,7 +520,7 @@ export const MonolithicView: React.FC<MonolithicViewProps> = ({
                   addLog(`Switched active agent to ${found.name} (Port ${found.port})`, 'SYS', 'ok');
                 }
               }}
-              className="w-full bg-[#1f1f1f] border border-[#3a3a3a] text-[#e6e6e6] px-2.5 py-2 text-xs focus:border-[#ff3300] outline-none rounded-none cursor-pointer"
+              className="w-full bg-[#1f1f1f] border border-[#3a3a3a] text-[#e6e6e6] px-2.5 py-1.5 text-xs focus:border-[#ff3300] outline-none rounded-none cursor-pointer"
             >
               {CANONICAL_MYTHOS_AGENTS.map((agent) => (
                 <option key={agent.id} value={agent.id} className="bg-[#121212]">
@@ -477,19 +532,30 @@ export const MonolithicView: React.FC<MonolithicViewProps> = ({
 
           {/* Generation Model Select */}
           <div className="border border-[#2a2a2a] bg-[#161616] p-2.5 flex flex-col gap-2 rounded-none">
-            <label className="text-[11px] uppercase tracking-wider text-[#8a8a8a]">
-              Generation Model
-            </label>
+            <div className="flex justify-between items-center">
+              <label className="text-[11px] uppercase tracking-wider text-[#8a8a8a]">
+                Generation Model
+              </label>
+              <button
+                type="button"
+                onClick={handleFetchModels}
+                disabled={fetchingModels}
+                className="text-[9px] uppercase tracking-wider text-[#4a90e2] hover:text-white cursor-pointer disabled:opacity-50"
+              >
+                {fetchingModels ? 'FETCHING...' : 'FETCH MODELS'}
+              </button>
+            </div>
             <select
               id="modelSelect"
               value={generationModel}
               onChange={(e) => setGenerationModel(e.target.value)}
               className="w-full bg-[#1f1f1f] border border-[#3a3a3a] text-[#e6e6e6] px-2.5 py-1.5 text-xs focus:border-[#ff3300] outline-none rounded-none cursor-pointer"
             >
-              <option value="gemini-flash-latest">GEMINI FLASH LATEST</option>
-              <option value="gemini-3.5-flash">GEMINI 3.5 FLASH</option>
-              <option value="gemini-3.1-flash-lite">GEMINI 3.1 FLASH-LITE</option>
-              <option value="gemini-2.5-flash">GEMINI 2.5 FLASH</option>
+              {availableModels.map((model) => (
+                <option key={model} value={model}>
+                  {model.toUpperCase().replace(/-/g, ' ')}
+                </option>
+              ))}
             </select>
           </div>
 
@@ -530,7 +596,7 @@ export const MonolithicView: React.FC<MonolithicViewProps> = ({
               className="text-[11px] uppercase tracking-wider text-[#8a8a8a] cursor-pointer flex justify-between select-none hover:text-white"
             >
               <span>[{showKeys ? '−' : '+'}] PARALLEL API ARRAY</span>
-              <span className="text-[10px] text-[#00ff41]">
+              <span className={`text-[10px] ${customApiKeys.length > 0 ? 'text-[#00ff41]' : 'text-[#8a8a8a]'}`}>
                 {customApiKeys.length > 0 ? `${customApiKeys.length} ACTIVE` : 'ENV DEFAULT'}
               </span>
             </label>
@@ -582,7 +648,7 @@ export const MonolithicView: React.FC<MonolithicViewProps> = ({
                   max={100}
                   value={batchSize}
                   onChange={(e) => setBatchSize(Number(e.target.value))}
-                  className="w-full bg-[#1f1f1f] border border-[#3a3a3a] text-[#e6e6e6] p-1.5 text-xs focus:border-[#ff3300] outline-none rounded-none"
+                  className="w-full bg-[#1f1f1f] border border-[#3a3a3a] text-[#e6e6e6] px-2.5 py-1.5 text-xs focus:border-[#ff3300] outline-none rounded-none"
                 />
               </div>
               <div>
@@ -593,7 +659,7 @@ export const MonolithicView: React.FC<MonolithicViewProps> = ({
                   max={10}
                   value={lanesPerKey}
                   onChange={(e) => setLanesPerKey(Number(e.target.value))}
-                  className="w-full bg-[#1f1f1f] border border-[#3a3a3a] text-[#e6e6e6] p-1.5 text-xs focus:border-[#ff3300] outline-none rounded-none"
+                  className="w-full bg-[#1f1f1f] border border-[#3a3a3a] text-[#e6e6e6] px-2.5 py-1.5 text-xs focus:border-[#ff3300] outline-none rounded-none"
                 />
               </div>
             </div>
@@ -607,7 +673,7 @@ export const MonolithicView: React.FC<MonolithicViewProps> = ({
                   max={10000}
                   value={chunkSize}
                   onChange={(e) => setChunkSize(Number(e.target.value))}
-                  className="w-full bg-[#1f1f1f] border border-[#3a3a3a] text-[#e6e6e6] p-1.5 text-xs focus:border-[#ff3300] outline-none rounded-none"
+                  className="w-full bg-[#1f1f1f] border border-[#3a3a3a] text-[#e6e6e6] px-2.5 py-1.5 text-xs focus:border-[#ff3300] outline-none rounded-none"
                 />
               </div>
               <div>
@@ -619,7 +685,7 @@ export const MonolithicView: React.FC<MonolithicViewProps> = ({
                   step={0.01}
                   value={graphThreshold}
                   onChange={(e) => setGraphThreshold(Number(e.target.value))}
-                  className="w-full bg-[#1f1f1f] border border-[#3a3a3a] text-[#e6e6e6] p-1.5 text-xs focus:border-[#ff3300] outline-none rounded-none"
+                  className="w-full bg-[#1f1f1f] border border-[#3a3a3a] text-[#e6e6e6] px-2.5 py-1.5 text-xs focus:border-[#ff3300] outline-none rounded-none"
                 />
               </div>
             </div>

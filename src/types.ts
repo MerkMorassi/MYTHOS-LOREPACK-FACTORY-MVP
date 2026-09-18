@@ -32,8 +32,9 @@ export interface TripletEdge {
 export interface LorepackModel {
   getEmbeddings(text: string, keys?: string[]): Promise<number[] | null | undefined>;
   getEmbeddingsBatch?(texts: string[], keys?: string[]): Promise<number[][]>;
-  extractTripletsFromText(text: string, keys?: string[]): Promise<Triplet[]>;
+  extractTripletsFromText(text: string, modelName?: string, keys?: string[]): Promise<Triplet[]>;
   generateText?(prompt: string, systemPrompt?: string, modelName?: string, keys?: string[]): Promise<string>;
+  fetchModels?(): Promise<string[]>;
 }
 
 export interface LorepackStore {

@@ -1,7 +1,7 @@
 import type { LorepackModel, Triplet } from '../types.ts';
 
 const EMBEDDING_MODEL = 'gemini-embedding-2';
-const GENERATION_MODEL = 'gemini-3.8-flash';
+const GENERATION_MODEL = 'gemini-3.6-flash';
 
 function cleanJsonFence(text: string): string {
   let clean = String(text || '').trim();
@@ -139,7 +139,7 @@ export class GeminiProvider implements LorepackModel {
     }
   }
 
-  async extractTripletsFromText(text: string): Promise<Triplet[]> {
+  async extractTripletsFromText(text: string, modelName = GENERATION_MODEL): Promise<Triplet[]> {
     if (!text || !text.trim()) {
       return [];
     }
@@ -148,7 +148,7 @@ export class GeminiProvider implements LorepackModel {
       if (this.apiKeys.length > 0) {
         const key = this._getKey();
         const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
-          GENERATION_MODEL
+          modelName
         )}:generateContent?key=${encodeURIComponent(key)}`;
 
         const systemPrompt = `SYSTEM:
@@ -303,6 +303,62 @@ If no defensible relationship exists, return [].`;
     } catch (error) {
       console.error('[GeminiProvider] Content generation error:', error);
       throw error;
+    }
+  }
+
+  async fetchModels(): Promise<string[]> {
+    try {
+      if (this.apiKeys.length > 0) {
+        try {
+          const key = this._getKey();
+          const url = `https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(key)}`;
+          const response = await fetch(url);
+          
+          if (response.ok) {
+            const data = await response.json();
+            const models = data.models || [];
+            if (models.length > 0) {
+              return models.map((m: any) => m.name.replace('models/', ''));
+            }
+          }
+        } catch (clientErr) {
+          console.warn('[GeminiProvider] Client-side fetch models failed, falling back to server proxy:', clientErr);
+        }
+      }
+      
+      // Fallback to server proxy
+      try {
+        const response = await fetch('/api/lorepack/models');
+        if (response.ok) {
+          const data = await response.json();
+          if (data.models && data.models.length > 0) {
+            return data.models;
+          }
+        }
+      } catch (proxyErr) {
+        console.warn('[GeminiProvider] Server proxy model fetch failed, using default fallback list:', proxyErr);
+      }
+
+      return [
+        'gemini-3.6-flash',
+        'gemini-3.8-flash',
+        'gemini-3-flash-preview',
+        'gemini-3.1-pro-preview',
+        'gemini-2.5-pro',
+        'gemini-1.5-flash',
+        'gemini-1.5-pro'
+      ];
+    } catch (error) {
+      console.error('[GeminiProvider] Fetch models error:', error);
+      return [
+        'gemini-3.6-flash',
+        'gemini-3.8-flash',
+        'gemini-3-flash-preview',
+        'gemini-3.1-pro-preview',
+        'gemini-2.5-pro',
+        'gemini-1.5-flash',
+        'gemini-1.5-pro'
+      ];
     }
   }
 }

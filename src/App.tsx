@@ -16,6 +16,7 @@ import { runMvpTestMatrix } from './core-test-runner.ts';
 import type { TestSuiteState } from './core-test-runner.ts';
 import { NavBar, AppSectionTab } from './components/NavBar.tsx';
 import { MonolithicView } from './components/MonolithicView.tsx';
+import { NetworkGraphView } from './components/NetworkGraphView.tsx';
 import { 
   Terminal, 
   Database, 
@@ -35,7 +36,8 @@ import {
   ChevronLeft,
   ChevronRight,
   X,
-  Trash2
+  Trash2,
+  Settings
 } from 'lucide-react';
 
 export default function App() {
@@ -52,6 +54,35 @@ export default function App() {
   // Custom Multi-Key Rotation Pool States
   const [customApiKeys, setCustomApiKeys] = useState<string[]>([]);
   const [newKeyInput, setNewKeyInput] = useState<string>('');
+  const [showSettingsModal, setShowSettingsModal] = useState<boolean>(false);
+  const [autoSaveArchive, setAutoSaveArchive] = useState<boolean>(() => {
+    return localStorage.getItem('mythos_autosave_archive') === 'true';
+  });
+
+  useEffect(() => {
+    localStorage.setItem('mythos_autosave_archive', String(autoSaveArchive));
+  }, [autoSaveArchive]);
+
+  const performAutoSaveArchive = async () => {
+    if (!factory) return;
+    try {
+      let exportLines: string[] = [];
+      const batchGenerator = factory.yieldExportBatches(agentId, 500);
+      for await (const batch of batchGenerator) {
+        for (const item of batch) {
+          exportLines.push(JSON.stringify(item));
+        }
+      }
+      if (exportLines.length > 0) {
+        const payload = exportLines.join('\n');
+        localStorage.setItem(`mythos_lorepack_archive_${agentId}`, payload);
+        localStorage.setItem('mythos_lorepack_archive_latest', payload);
+        log(`[AUTOSAVE]: Lorepack archive auto-saved to local storage (${exportLines.length} blocks).`);
+      }
+    } catch (err: any) {
+      log(`[AUTOSAVE_ERROR]: Failed to auto-save archive: ${err.message || err}`);
+    }
+  };
 
   // Navigation Section Tab State (Defaults to Monolithic Style)
   const [activeNavTab, setActiveNavTab] = useState<AppSectionTab>('monolithic');
@@ -341,6 +372,10 @@ export default function App() {
 
       log(`[INGEST]: Success. Saved ${result.ingested} node vectors to IndexedDB.`);
       await refreshExplorer();
+
+      if (autoSaveArchive) {
+        await performAutoSaveArchive();
+      }
     } catch (err: any) {
       log(`[INGEST_ERROR]: Processing halted: ${err.message || err}`);
       setLastRunResults((prev) => ({
@@ -782,6 +817,26 @@ export default function App() {
             No custom API keys registered. Falling back to secure server-side proxy lanes.
           </p>
         )}
+
+        <div className="mt-4 pt-3 border-t border-neutral-800 flex items-center justify-between">
+          <div>
+            <span className="block text-xs font-bold text-white uppercase tracking-wider">Auto-Save Archive After Ingestion</span>
+            <span className="text-[10px] text-neutral-400">Automatically export &amp; store Lorepack archive in browser localStorage after every ingestion process</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setAutoSaveArchive(!autoSaveArchive)}
+            className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors cursor-pointer ${
+              autoSaveArchive ? 'bg-emerald-600' : 'bg-neutral-800'
+            }`}
+          >
+            <span
+              className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                autoSaveArchive ? 'translate-x-6' : 'translate-x-1'
+              }`}
+            />
+          </button>
+        </div>
       </div>
     </section>
   );
@@ -1012,32 +1067,6 @@ export default function App() {
 
         {/* Global Hardware Status Bars */}
         <div className="flex flex-wrap items-center gap-3">
-          {/* Active Workspace Selector */}
-          <div className="flex items-center space-x-2 bg-neutral-950 px-2 py-1 border border-neutral-800 rounded">
-            <span className="text-[10px] text-neutral-500 font-semibold uppercase">Workspace:</span>
-            <select 
-              id="workspaceAgentSelector"
-              value={agentId} 
-              onChange={(e) => {
-                const selected = getCanonicalAgentById(e.target.value);
-                const nextId = selected ? selected.id : e.target.value;
-                const nextHandle = selected ? selected.handle : e.target.value.replace(/^agent-/, '');
-                setAgentId(nextId);
-                setAgentHandle(nextHandle);
-                setSelectedRecord(null);
-                setLastRunResults(null);
-                setLastImportResults(null);
-              }}
-              className="bg-transparent text-xs text-white border-none focus:outline-none focus:ring-0 uppercase font-mono cursor-pointer"
-            >
-              {CANONICAL_MYTHOS_AGENTS.map((agent) => (
-                <option key={agent.id} value={agent.id} className="bg-neutral-900 text-neutral-200">
-                  [{agent.port}] {agent.id} — {agent.handle} ({agent.role.split(':')[0]})
-                </option>
-              ))}
-            </select>
-          </div>
-
           <div className="flex items-center space-x-2 bg-neutral-950 px-3 py-1.5 border border-neutral-800 rounded text-xs">
             <Database className="h-3.5 w-3.5 text-neutral-500" />
             <span className="text-[10px] text-neutral-400">DATABASE:</span>
@@ -1053,6 +1082,13 @@ export default function App() {
               {apiState}
             </span>
           </div>
+          <button
+            onClick={() => setShowSettingsModal(true)}
+            className="flex items-center justify-center bg-neutral-950 hover:bg-neutral-800 border border-neutral-800 p-1.5 rounded text-neutral-400 hover:text-white transition-colors cursor-pointer"
+            title="API Settings"
+          >
+            <Settings className="h-4 w-4" />
+          </button>
         </div>
       </header>
 
@@ -1097,6 +1133,13 @@ export default function App() {
             setCustomApiKeys={setCustomApiKeys}
           />
         </main>
+      ) : activeNavTab === 'graph-view' ? (
+        <NetworkGraphView
+          agents={CANONICAL_MYTHOS_AGENTS}
+          activeAgentId={agentId}
+          store={store}
+          factory={factory}
+        />
       ) : (
         <main className="flex-1 p-6 grid grid-cols-1 lg:grid-cols-12 gap-6 max-w-7xl mx-auto w-full">
           {/* Left Column (8 cols): Storage, Ingest, Graph operations */}
@@ -1105,6 +1148,34 @@ export default function App() {
             {/* Live Telemetry Overview & Canonical Dossier */}
             {(activeNavTab === 'all' || activeNavTab === 'workspace') && (
               <>
+                {/* Active Workspace Selector */}
+                <div className="bg-neutral-900 border border-neutral-800 p-4 rounded flex items-center justify-between">
+                  <div className="flex items-center space-x-2">
+                    <span className="text-[10px] text-neutral-500 font-semibold uppercase tracking-widest">Workspace & Agent:</span>
+                    <select 
+                      id="workspaceAgentSelector"
+                      value={agentId} 
+                      onChange={(e) => {
+                        const selected = getCanonicalAgentById(e.target.value);
+                        const nextId = selected ? selected.id : e.target.value;
+                        const nextHandle = selected ? selected.handle : e.target.value.replace(/^agent-/, '');
+                        setAgentId(nextId);
+                        setAgentHandle(nextHandle);
+                        setSelectedRecord(null);
+                        setLastRunResults(null);
+                        setLastImportResults(null);
+                      }}
+                      className="bg-neutral-950 px-3 py-1.5 border border-neutral-800 rounded text-xs text-white uppercase font-mono cursor-pointer outline-none focus:border-emerald-500/50"
+                    >
+                      {CANONICAL_MYTHOS_AGENTS.map((agent) => (
+                        <option key={agent.id} value={agent.id} className="bg-neutral-900 text-neutral-200">
+                          [{agent.port}] {agent.id} — {agent.handle} ({agent.role.split(':')[0]})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
                 <div className="bg-neutral-900 border border-neutral-800 p-4 rounded grid grid-cols-2 md:grid-cols-4 gap-4">
             <div>
               <p className="text-[10px] text-neutral-500 uppercase tracking-widest">Active Workspace</p>
@@ -1424,7 +1495,7 @@ export default function App() {
               <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
                 <div className="max-w-xl">
                   <p className="text-xs text-neutral-300 leading-relaxed">
-                    Evaluates all ingested vector nodes for the active workspace, triggers structured language relationship extraction (using <span className="text-blue-400 font-bold font-mono">gemini-3.8-flash</span>) for subjects, actions, and objects, and constructs a robust semantic relationship mesh.
+                    Evaluates all ingested vector nodes for the active workspace, triggers structured language relationship extraction (using <span className="text-blue-400 font-bold font-mono">gemini-3.6-flash</span>) for subjects, actions, and objects, and constructs a robust semantic relationship mesh.
                   </p>
                 </div>
                 <button
@@ -2058,6 +2129,21 @@ export default function App() {
           <div className="mt-2.5 pt-2 border-t border-neutral-800 flex items-center justify-between text-[9px] text-neutral-400 uppercase tracking-wider">
             <span className="font-semibold text-neutral-400">SYSTEM FEEDBACK • {destructiveFeedback.action}</span>
             <span>{destructiveFeedback.timestamp}</span>
+          </div>
+        </div>
+      )}
+
+      {/* Settings Modal Overlay */}
+      {showSettingsModal && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+          <div className="w-full max-w-lg shadow-2xl relative">
+            <button
+              onClick={() => setShowSettingsModal(false)}
+              className="absolute -top-3 -right-3 bg-neutral-800 hover:bg-neutral-700 text-neutral-300 hover:text-white border border-neutral-700 p-1.5 rounded-full z-10 transition-colors"
+            >
+              <X className="h-4 w-4" />
+            </button>
+            {apiKeysModule}
           </div>
         </div>
       )}
