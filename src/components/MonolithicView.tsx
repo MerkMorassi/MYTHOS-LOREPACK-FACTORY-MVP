@@ -64,6 +64,8 @@ export const MonolithicView: React.FC<MonolithicViewProps> = ({
     'gemini-1.5-pro'
   ]);
   const [fetchingModels, setFetchingModels] = useState<boolean>(false);
+  const [showAgentIdentity, setShowAgentIdentity] = useState<boolean>(false);
+  const [showGenerationModel, setShowGenerationModel] = useState<boolean>(false);
   const [showPrompt, setShowPrompt] = useState<boolean>(false);
   const [systemPrompt, setSystemPrompt] = useState<string>(activeAgent.system_instruction);
   const [showKeys, setShowKeys] = useState<boolean>(false);
@@ -80,6 +82,8 @@ export const MonolithicView: React.FC<MonolithicViewProps> = ({
   }, [customApiKeys]);
 
   // Hyperparameters
+  const [showEmbeddingModel, setShowEmbeddingModel] = useState<boolean>(false);
+  const [showOperations, setShowOperations] = useState<boolean>(true);
   const [embeddingModel] = useState<string>('gemini-embedding-2');
   const [batchSize, setBatchSize] = useState<number>(40);
   const [lanesPerKey, setLanesPerKey] = useState<number>(2);
@@ -504,59 +508,74 @@ export const MonolithicView: React.FC<MonolithicViewProps> = ({
       <div className="flex-1 grid grid-cols-1 lg:grid-cols-[360px_1fr] min-h-0">
         {/* Left Column: CONTROL SURFACE */}
         <div className="bg-[#121212] border-b lg:border-b-0 lg:border-r border-[#2a2a2a] p-3 flex flex-col gap-2.5 overflow-y-auto max-h-[85vh] lg:max-h-none">
-          {/* Agent ID Input / Select */}
+          {/* Agent ID Input / Select Collapsible */}
           <div className="border border-[#2a2a2a] bg-[#161616] p-2.5 flex flex-col gap-2 rounded-none">
-            <label className="text-[11px] uppercase tracking-wider text-[#8a8a8a] flex justify-between">
-              <span>Agent Identity</span>
+            <label
+              onClick={() => setShowAgentIdentity(!showAgentIdentity)}
+              className="text-[11px] uppercase tracking-wider text-[#8a8a8a] cursor-pointer flex justify-between select-none hover:text-white"
+            >
+              <span>[{showAgentIdentity ? '−' : '+'}] AGENT IDENTITY</span>
               <span className="text-[10px] text-[#ff3300]">[{activeAgent.handle}]</span>
             </label>
-            <select
-              value={agentId}
-              onChange={(e) => {
-                const found = getCanonicalAgentById(e.target.value);
-                if (found) {
-                  setAgentId(found.id);
-                  setAgentHandle(found.handle);
-                  addLog(`Switched active agent to ${found.name} (Port ${found.port})`, 'SYS', 'ok');
-                }
-              }}
-              className="w-full bg-[#1f1f1f] border border-[#3a3a3a] text-[#e6e6e6] px-2.5 py-1.5 text-xs focus:border-[#ff3300] outline-none rounded-none cursor-pointer"
-            >
-              {CANONICAL_MYTHOS_AGENTS.map((agent) => (
-                <option key={agent.id} value={agent.id} className="bg-[#121212]">
-                  [{agent.port}] {agent.id} — {agent.handle}
-                </option>
-              ))}
-            </select>
+            {showAgentIdentity && (
+              <div className="pt-2 border-t border-[#2a2a2a] flex flex-col gap-2">
+                <select
+                  value={agentId}
+                  onChange={(e) => {
+                    const found = getCanonicalAgentById(e.target.value);
+                    if (found) {
+                      setAgentId(found.id);
+                      setAgentHandle(found.handle);
+                      addLog(`Switched active agent to ${found.name} (Port ${found.port})`, 'SYS', 'ok');
+                    }
+                  }}
+                  className="w-full bg-[#1f1f1f] border border-[#3a3a3a] text-[#e6e6e6] px-2.5 py-1.5 text-xs focus:border-[#ff3300] outline-none rounded-none cursor-pointer"
+                >
+                  {CANONICAL_MYTHOS_AGENTS.map((agent) => (
+                    <option key={agent.id} value={agent.id} className="bg-[#121212]">
+                      [{agent.port}] {agent.id} — {agent.handle}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
           </div>
 
-          {/* Generation Model Select */}
+          {/* Generation Model Select Collapsible */}
           <div className="border border-[#2a2a2a] bg-[#161616] p-2.5 flex flex-col gap-2 rounded-none">
             <div className="flex justify-between items-center">
-              <label className="text-[11px] uppercase tracking-wider text-[#8a8a8a]">
-                Generation Model
+              <label
+                onClick={() => setShowGenerationModel(!showGenerationModel)}
+                className="text-[11px] uppercase tracking-wider text-[#8a8a8a] cursor-pointer flex-1 flex justify-between select-none hover:text-white mr-2"
+              >
+                <span>[{showGenerationModel ? '−' : '+'}] GENERATION MODEL</span>
+                <span className="text-white font-mono text-[10px] truncate max-w-[120px]">{generationModel}</span>
               </label>
               <button
                 type="button"
                 onClick={handleFetchModels}
                 disabled={fetchingModels}
-                className="text-[9px] uppercase tracking-wider text-[#4a90e2] hover:text-white cursor-pointer disabled:opacity-50"
+                className="text-[9px] uppercase tracking-wider text-[#4a90e2] hover:text-white cursor-pointer disabled:opacity-50 shrink-0"
               >
                 {fetchingModels ? 'FETCHING...' : 'FETCH MODELS'}
               </button>
             </div>
-            <select
-              id="modelSelect"
-              value={generationModel}
-              onChange={(e) => setGenerationModel(e.target.value)}
-              className="w-full bg-[#1f1f1f] border border-[#3a3a3a] text-[#e6e6e6] px-2.5 py-1.5 text-xs focus:border-[#ff3300] outline-none rounded-none cursor-pointer"
-            >
-              {availableModels.map((model) => (
-                <option key={model} value={model}>
-                  {model.toUpperCase().replace(/-/g, ' ')}
-                </option>
-              ))}
-            </select>
+            {showGenerationModel && (
+              <div className="pt-2 border-t border-[#2a2a2a] flex flex-col gap-2">
+                <select
+                  id="modelSelect"
+                  value={generationModel}
+                  onChange={(e) => setGenerationModel(e.target.value)}
+                  className="w-full bg-[#1f1f1f] border border-[#3a3a3a] text-[#e6e6e6] px-2.5 py-1.5 text-xs focus:border-[#ff3300] outline-none rounded-none cursor-pointer"
+                >
+                  {availableModels.map((model) => (
+                    <option key={model} value={model}>
+                      {model.toUpperCase().replace(/-/g, ' ')}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
           </div>
 
           {/* System Instructions Collapsible */}
@@ -633,62 +652,69 @@ export const MonolithicView: React.FC<MonolithicViewProps> = ({
             )}
           </div>
 
-          {/* Hyperparameters */}
+          {/* Embedding Model & Hyperparameters Collapsible */}
           <div className="border border-[#2a2a2a] bg-[#161616] p-2.5 flex flex-col gap-2 rounded-none">
-            <div className="flex justify-between items-center text-[11px] text-[#8a8a8a]">
-              <span>EMBEDDING MODEL</span>
-              <span className="text-white font-mono">{embeddingModel}</span>
-            </div>
-            <div className="grid grid-cols-2 gap-2 text-xs">
-              <div>
-                <label className="text-[10px] text-[#8a8a8a] block mb-1">BATCH SIZE</label>
-                <input
-                  type="number"
-                  min={1}
-                  max={100}
-                  value={batchSize}
-                  onChange={(e) => setBatchSize(Number(e.target.value))}
-                  className="w-full bg-[#1f1f1f] border border-[#3a3a3a] text-[#e6e6e6] px-2.5 py-1.5 text-xs focus:border-[#ff3300] outline-none rounded-none"
-                />
-              </div>
-              <div>
-                <label className="text-[10px] text-[#8a8a8a] block mb-1">LANES PER KEY</label>
-                <input
-                  type="number"
-                  min={1}
-                  max={10}
-                  value={lanesPerKey}
-                  onChange={(e) => setLanesPerKey(Number(e.target.value))}
-                  className="w-full bg-[#1f1f1f] border border-[#3a3a3a] text-[#e6e6e6] px-2.5 py-1.5 text-xs focus:border-[#ff3300] outline-none rounded-none"
-                />
-              </div>
-            </div>
+            <label
+              onClick={() => setShowEmbeddingModel(!showEmbeddingModel)}
+              className="text-[11px] uppercase tracking-wider text-[#8a8a8a] cursor-pointer flex justify-between select-none hover:text-white"
+            >
+              <span>[{showEmbeddingModel ? '−' : '+'}] EMBEDDING MODEL</span>
+              <span className="text-white font-mono text-[10px]">{embeddingModel}</span>
+            </label>
+            {showEmbeddingModel && (
+              <div className="pt-2 border-t border-[#2a2a2a] flex flex-col gap-2">
+                <div className="grid grid-cols-2 gap-2 text-xs">
+                  <div>
+                    <label className="text-[10px] text-[#8a8a8a] block mb-1">BATCH SIZE</label>
+                    <input
+                      type="number"
+                      min={1}
+                      max={100}
+                      value={batchSize}
+                      onChange={(e) => setBatchSize(Number(e.target.value))}
+                      className="w-full bg-[#1f1f1f] border border-[#3a3a3a] text-[#e6e6e6] px-2.5 py-1.5 text-xs focus:border-[#ff3300] outline-none rounded-none"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-[#8a8a8a] block mb-1">LANES PER KEY</label>
+                    <input
+                      type="number"
+                      min={1}
+                      max={10}
+                      value={lanesPerKey}
+                      onChange={(e) => setLanesPerKey(Number(e.target.value))}
+                      className="w-full bg-[#1f1f1f] border border-[#3a3a3a] text-[#e6e6e6] px-2.5 py-1.5 text-xs focus:border-[#ff3300] outline-none rounded-none"
+                    />
+                  </div>
+                </div>
 
-            <div className="grid grid-cols-2 gap-2 text-xs">
-              <div>
-                <label className="text-[10px] text-[#8a8a8a] block mb-1">CHUNK CEILING</label>
-                <input
-                  type="number"
-                  min={100}
-                  max={10000}
-                  value={chunkSize}
-                  onChange={(e) => setChunkSize(Number(e.target.value))}
-                  className="w-full bg-[#1f1f1f] border border-[#3a3a3a] text-[#e6e6e6] px-2.5 py-1.5 text-xs focus:border-[#ff3300] outline-none rounded-none"
-                />
+                <div className="grid grid-cols-2 gap-2 text-xs">
+                  <div>
+                    <label className="text-[10px] text-[#8a8a8a] block mb-1">CHUNK CEILING</label>
+                    <input
+                      type="number"
+                      min={100}
+                      max={10000}
+                      value={chunkSize}
+                      onChange={(e) => setChunkSize(Number(e.target.value))}
+                      className="w-full bg-[#1f1f1f] border border-[#3a3a3a] text-[#e6e6e6] px-2.5 py-1.5 text-xs focus:border-[#ff3300] outline-none rounded-none"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-[#8a8a8a] block mb-1">GRAPH SIMILARITY</label>
+                    <input
+                      type="number"
+                      min={0}
+                      max={1}
+                      step={0.01}
+                      value={graphThreshold}
+                      onChange={(e) => setGraphThreshold(Number(e.target.value))}
+                      className="w-full bg-[#1f1f1f] border border-[#3a3a3a] text-[#e6e6e6] px-2.5 py-1.5 text-xs focus:border-[#ff3300] outline-none rounded-none"
+                    />
+                  </div>
+                </div>
               </div>
-              <div>
-                <label className="text-[10px] text-[#8a8a8a] block mb-1">GRAPH SIMILARITY</label>
-                <input
-                  type="number"
-                  min={0}
-                  max={1}
-                  step={0.01}
-                  value={graphThreshold}
-                  onChange={(e) => setGraphThreshold(Number(e.target.value))}
-                  className="w-full bg-[#1f1f1f] border border-[#3a3a3a] text-[#e6e6e6] px-2.5 py-1.5 text-xs focus:border-[#ff3300] outline-none rounded-none"
-                />
-              </div>
-            </div>
+            )}
           </div>
 
           {/* Action Buttons Surface */}
@@ -703,102 +729,138 @@ export const MonolithicView: React.FC<MonolithicViewProps> = ({
 
           <hr className="border-t border-[#2a2a2a] my-1" />
 
-          {/* Stage Files Button */}
-          <input
-            ref={fileInputRef}
-            type="file"
-            multiple
-            onChange={handleStageFiles}
-            className="hidden"
-            accept=".txt,.md,.json,.csv,.lorepack"
-          />
-          <button
-            id="stageFilesBtn"
-            type="button"
-            onClick={() => fileInputRef.current?.click()}
-            className="w-full bg-[#1c1c1c] hover:bg-[#222] border border-[#3a3a3a] hover:border-[#ff3300] text-[#e6e6e6] py-2 px-3 text-xs font-black uppercase tracking-wider transition-colors cursor-pointer rounded-none flex items-center justify-between"
-          >
-            <span>[+] STAGE FILES</span>
-            <span className="text-[10px] text-[#00ff41]">
-              {stagedFiles.length > 0 ? `${stagedFiles.length} READY` : 'EMPTY'}
-            </span>
-          </button>
-
-          {/* Ingest Lore */}
-          <button
-            id="ingestBtn"
-            type="button"
-            disabled={isProcessing}
-            onClick={handleIngestLore}
-            className="w-full bg-[#1c1c1c] hover:bg-[#222] border border-[#3a3a3a] hover:border-[#ff3300] text-[#e6e6e6] disabled:opacity-40 py-2 px-3 text-xs font-black uppercase tracking-wider transition-colors cursor-pointer rounded-none"
-          >
-            {isProcessing ? 'INGESTING...' : 'INGEST LORE'}
-          </button>
-
-          {/* Build Graph Lite */}
-          <button
-            id="buildGraphBtn"
-            type="button"
-            disabled={isProcessing}
-            onClick={handleBuildGraphLite}
-            className="w-full bg-[#1c1c1c] hover:bg-[#222] border border-[#3a3a3a] hover:border-[#ff3300] text-[#ff3300] disabled:opacity-40 py-2 px-3 text-xs font-black uppercase tracking-wider transition-colors cursor-pointer rounded-none"
-          >
-            BUILD GRAPH LITE
-          </button>
-
-          {/* Run Core Function Test */}
-          <button
-            id="testMatrixBtn"
-            type="button"
-            onClick={() => {
-              if (onRunTestMatrix) {
-                onRunTestMatrix();
-                addLog('Triggered MVP Acceptance Test Matrix runner...', 'TEST', 'sys');
-              } else {
-                addLog('Core test suite handler dispatched.', 'TEST', 'sys');
-              }
-            }}
-            className="w-full bg-[#1c1c1c] hover:bg-[#222] border border-[#3a3a3a] hover:border-[#ff3300] text-[#e6e6e6] py-2 px-3 text-xs font-black uppercase tracking-wider transition-colors cursor-pointer rounded-none"
-          >
-            RUN CORE FUNCTION TEST
-          </button>
-
-          {/* Export / Import GZIP */}
-          <div className="grid grid-cols-2 gap-2">
-            <button
-              id="exportBtn"
-              type="button"
-              onClick={handleExportGzip}
-              className="bg-[#1c1c1c] hover:bg-[#222] border border-[#3a3a3a] hover:border-[#ff3300] text-[#e6e6e6] py-2 px-2 text-[11px] font-black uppercase tracking-wider transition-colors cursor-pointer rounded-none text-center"
+          {/* Collapsible Operations Section */}
+          <div className="border border-[#2a2a2a] bg-[#161616] p-2.5 flex flex-col gap-2 rounded-none">
+            <label
+              onClick={() => setShowOperations(!showOperations)}
+              className="text-[11px] uppercase tracking-wider text-[#8a8a8a] cursor-pointer flex justify-between select-none hover:text-white"
             >
-              EXPORT (GZIP)
-            </button>
-            <input
-              ref={importFileRef}
-              type="file"
-              accept=".gz,.jsonl,.json"
-              onChange={handleImportGzip}
-              className="hidden"
-            />
-            <button
-              id="importBtn"
-              type="button"
-              onClick={() => importFileRef.current?.click()}
-              className="bg-[#1c1c1c] hover:bg-[#222] border border-[#3a3a3a] hover:border-[#ff3300] text-[#e6e6e6] py-2 px-2 text-[11px] font-black uppercase tracking-wider transition-colors cursor-pointer rounded-none text-center"
-            >
-              IMPORT (GZIP)
-            </button>
+              <span>[{showOperations ? '−' : '+'}] OPERATIONS</span>
+              <span className="text-[10px] text-[#8a8a8a]">
+                {isProcessing ? 'BUSY' : stagedFiles.length > 0 ? `${stagedFiles.length} STAGED` : 'IDLE'}
+              </span>
+            </label>
+
+            {showOperations && (
+              <div className="pt-2 border-t border-[#2a2a2a] flex flex-col gap-2">
+                {/* Stage Files Button (Centered, without [+]) */}
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  multiple
+                  onChange={handleStageFiles}
+                  className="hidden"
+                  accept=".txt,.md,.json,.csv,.lorepack"
+                />
+                <button
+                  id="stageFilesBtn"
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  className="w-full bg-[#1c1c1c] hover:bg-[#222] border border-[#3a3a3a] hover:border-[#ff3300] text-[#e6e6e6] py-2 px-3 text-xs font-black uppercase tracking-wider transition-colors cursor-pointer rounded-none flex items-center justify-center gap-2 text-center"
+                >
+                  <span>STAGE FILES</span>
+                  <span className="text-[10px] text-[#00ff41]">
+                    {stagedFiles.length > 0 ? `(${stagedFiles.length} READY)` : '(EMPTY)'}
+                  </span>
+                </button>
+
+                {/* Staged file list status & Empty action */}
+                {stagedFiles.length > 0 && (
+                  <div className="flex justify-between items-center px-1 text-[10px]">
+                    <span className="text-[#8a8a8a] font-mono truncate max-w-[180px]">
+                      {stagedFiles.map((f) => f.name).join(', ')}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setStagedFiles([]);
+                        addLog('Cleared all staged files.', 'SYS', 'sys');
+                      }}
+                      className="text-[#ff3366] hover:text-[#ff0033] underline cursor-pointer uppercase font-bold"
+                    >
+                      EMPTY
+                    </button>
+                  </div>
+                )}
+
+                {/* Ingest Lore */}
+                <button
+                  id="ingestBtn"
+                  type="button"
+                  disabled={isProcessing}
+                  onClick={handleIngestLore}
+                  className="w-full bg-[#1c1c1c] hover:bg-[#222] border border-[#3a3a3a] hover:border-[#ff3300] text-[#e6e6e6] disabled:opacity-40 py-2 px-3 text-xs font-black uppercase tracking-wider transition-colors cursor-pointer rounded-none text-center"
+                >
+                  {isProcessing ? 'INGESTING...' : 'INGEST LORE'}
+                </button>
+
+                {/* Build Graph Lite */}
+                <button
+                  id="buildGraphBtn"
+                  type="button"
+                  disabled={isProcessing}
+                  onClick={handleBuildGraphLite}
+                  className="w-full bg-[#1c1c1c] hover:bg-[#222] border border-[#3a3a3a] hover:border-[#ff3300] text-[#ff3300] disabled:opacity-40 py-2 px-3 text-xs font-black uppercase tracking-wider transition-colors cursor-pointer rounded-none text-center"
+                >
+                  BUILD GRAPH LITE
+                </button>
+
+                {/* Run Core Function Test */}
+                <button
+                  id="testMatrixBtn"
+                  type="button"
+                  onClick={() => {
+                    if (onRunTestMatrix) {
+                      onRunTestMatrix();
+                      addLog('Triggered MVP Acceptance Test Matrix runner...', 'TEST', 'sys');
+                    } else {
+                      addLog('Core test suite handler dispatched.', 'TEST', 'sys');
+                    }
+                  }}
+                  className="w-full bg-[#1c1c1c] hover:bg-[#222] border border-[#3a3a3a] hover:border-[#ff3300] text-[#e6e6e6] py-2 px-3 text-xs font-black uppercase tracking-wider transition-colors cursor-pointer rounded-none text-center"
+                >
+                  RUN CORE FUNCTION TEST
+                </button>
+
+                {/* Export / Import GZIP */}
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    id="exportBtn"
+                    type="button"
+                    onClick={handleExportGzip}
+                    className="bg-[#1c1c1c] hover:bg-[#222] border border-[#3a3a3a] hover:border-[#ff3300] text-[#e6e6e6] py-2 px-2 text-[11px] font-black uppercase tracking-wider transition-colors cursor-pointer rounded-none text-center"
+                  >
+                    EXPORT (GZIP)
+                  </button>
+                  <input
+                    ref={importFileRef}
+                    type="file"
+                    accept=".gz,.jsonl,.json"
+                    onChange={handleImportGzip}
+                    className="hidden"
+                  />
+                  <button
+                    id="importBtn"
+                    type="button"
+                    onClick={() => importFileRef.current?.click()}
+                    className="bg-[#1c1c1c] hover:bg-[#222] border border-[#3a3a3a] hover:border-[#ff3300] text-[#e6e6e6] py-2 px-2 text-[11px] font-black uppercase tracking-wider transition-colors cursor-pointer rounded-none text-center"
+                  >
+                    IMPORT (GZIP)
+                  </button>
+                </div>
+
+                {/* Nuke Vault Trigger */}
+                <button
+                  id="nukeTrigger"
+                  type="button"
+                  onClick={() => setShowNukeModal(true)}
+                  className="w-full bg-[#200a10] hover:bg-[#2a0d16] border border-[#5a1d2a] hover:border-[#ff3366] text-[#ff9ab3] py-2 px-3 text-xs font-black uppercase tracking-wider transition-colors cursor-pointer rounded-none text-center mt-1"
+                >
+                  NUKE VAULT
+                </button>
+              </div>
+            )}
           </div>
-
-          {/* Nuke Vault Trigger */}
-          <button
-            id="nukeTrigger"
-            type="button"
-            onClick={() => setShowNukeModal(true)}
-            className="w-full mt-auto bg-[#200a10] hover:bg-[#2a0d16] border border-[#5a1d2a] hover:border-[#ff3366] text-[#ff9ab3] py-2 px-3 text-xs font-black uppercase tracking-wider transition-colors cursor-pointer rounded-none"
-          >
-            NUKE VAULT
-          </button>
         </div>
 
         {/* Right Column: DASHBOARD & TERMINAL CONSOLE */}
