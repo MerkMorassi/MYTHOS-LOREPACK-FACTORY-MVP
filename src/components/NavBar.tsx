@@ -102,7 +102,7 @@ export const NavBar: React.FC<NavBarProps> = ({
     <nav
       id="mainNavBar"
       aria-label="Application Sections Navigation"
-      className="bg-neutral-900 border-b border-neutral-800 px-4 sm:px-6 sticky top-[57px] md:top-[65px] z-40 backdrop-blur-md overflow-x-auto select-none"
+      className="bg-neutral-900 border-b border-neutral-800 px-4 sm:px-6 shrink-0 z-30 overflow-x-auto select-none"
     >
       <div className="flex items-center space-x-1 sm:space-x-2 py-2 min-w-max">
         <span className="text-[10px] text-neutral-500 uppercase tracking-widest font-semibold mr-2 hidden md:inline-block">

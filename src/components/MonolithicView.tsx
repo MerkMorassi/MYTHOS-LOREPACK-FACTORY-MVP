@@ -476,38 +476,7 @@ export const MonolithicView: React.FC<MonolithicViewProps> = ({
           'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
       }}
     >
-      {/* 1. Header Bar matching monolithic style */}
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center px-4 py-2 bg-[#0f0f0f] border-b border-[#2a2a2a] gap-2 shrink-0">
-        <div className="font-extrabold tracking-wider text-sm flex items-center gap-2">
-          <span>MYTHOS</span>
-          <span className="text-[#8a8a8a]">//</span>
-          <span className="text-white">LOREPACK FACTORY</span>
-          <span className="text-[10px] px-1.5 py-0.5 bg-[#1a1a1a] border border-[#333] text-[#ffaa00]">
-            MONOLITHIC TERMINAL
-          </span>
-        </div>
-
-        <div className="text-xs text-[#8a8a8a] flex items-center gap-2">
-          <span>STATUS:</span>
-          <span
-            className={`font-bold uppercase tracking-wider ${
-              runtimeState === 'ERROR'
-                ? 'text-[#ff3366]'
-                : runtimeState === 'INGESTING' || runtimeState === 'PROCESSING'
-                ? 'text-[#ffaa00]'
-                : 'text-[#ff3300]'
-            }`}
-          >
-            {runtimeState}
-          </span>
-          <span className="text-[#2a2a2a]">|</span>
-          <span className="text-[11px] text-[#8a8a8a]">
-            PORT <strong className="text-[#00ff41]">{activeAgent.port}</strong> [{activeAgent.id}]
-          </span>
-        </div>
-      </div>
-
-      {/* 2. Main 2-Column Monolithic Grid */}
+      {/* Main 2-Column Monolithic Grid */}
       <div className="flex-1 grid grid-cols-1 lg:grid-cols-[360px_1fr] min-h-0 overflow-hidden">
         {/* Left Column: CONTROL SURFACE */}
         <div className="bg-[#121212] border-b lg:border-b-0 lg:border-r border-[#2a2a2a] p-3 flex flex-col gap-2 overflow-y-auto min-h-0 h-full">
@@ -945,22 +914,26 @@ export const MonolithicView: React.FC<MonolithicViewProps> = ({
           </div>
 
           {/* Console Header Bar */}
-          <div className="flex justify-between items-center text-xs text-[#8a8a8a] shrink-0">
-            <div className="flex items-center gap-2">
-              <span className="uppercase tracking-wider">RECORDS IN SCOPE:</span>
-              <span id="statVectorsLog" className="text-white font-bold font-mono">
+          <div className="flex flex-wrap justify-between items-center text-xs text-[#8a8a8a] shrink-0 gap-2">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="uppercase tracking-wider text-[10px]">RECORDS:</span>
+              <span id="statVectorsLog" className="text-white font-bold font-mono text-[11px]">
                 {stats.totalNodes}
               </span>
-              <span className="text-[#8a8a8a]">|</span>
-              <span className="text-[11px] text-[#8a8a8a]">
+              <span className="text-[#333]">|</span>
+              <span className="text-[10px] text-[#8a8a8a]">
                 LOCUS: <span className="text-[#9cc7ff]">MYTHOS.LORE.{activeAgent.id}</span>
+              </span>
+              <span className="text-[#333]">|</span>
+              <span className="text-[10px] text-[#8a8a8a]">
+                PORT: <span className="text-[#00ff41] font-bold">{activeAgent.port}</span>
               </span>
             </div>
             <button
               id="clearLogBtn"
               type="button"
               onClick={() => setLogs([])}
-              className="hover:text-white cursor-pointer uppercase tracking-wider text-[11px] transition-colors"
+              className="hover:text-white cursor-pointer uppercase tracking-wider text-[10px] transition-colors text-[#8a8a8a]"
             >
               [X] CLEAR LOG
             </button>
