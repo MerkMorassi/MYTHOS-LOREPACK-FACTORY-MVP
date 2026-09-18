@@ -1,8 +1,9 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Lock } from 'lucide-react';
+import { Lock, Edit3, Save, RotateCcw, Plus, Trash2, X, Sparkles, Bookmark, BookmarkPlus, Check } from 'lucide-react';
 import { LorepackFactory } from '../lorepack-factory.ts';
 import { IndexedDbLorepackStore } from '../indexeddb-store.ts';
 import { GeminiProvider } from '../providers/gemini-provider.ts';
+import { DEFAULT_PERSONA_PRESETS, PersonaPreset } from '../App.tsx';
 import {
   CANONICAL_MYTHOS_AGENTS,
   CanonicalAgent,
@@ -56,13 +57,11 @@ export const MonolithicView: React.FC<MonolithicViewProps> = ({
   // Monolithic Control States
   const [generationModel, setGenerationModel] = useState<string>('gemini-3.8-flash');
   const [availableModels, setAvailableModels] = useState<string[]>([
-    'gemini-3.6-flash',
     'gemini-3.8-flash',
-    'gemini-3-flash-preview',
+    'gemini-3.1-flash-lite',
     'gemini-3.1-pro-preview',
     'gemini-2.5-pro',
-    'gemini-1.5-flash',
-    'gemini-1.5-pro'
+    'gemini-2.5-flash'
   ]);
   const [fetchingModels, setFetchingModels] = useState<boolean>(false);
   const [showAgentIdentity, setShowAgentIdentity] = useState<boolean>(false);
@@ -70,6 +69,67 @@ export const MonolithicView: React.FC<MonolithicViewProps> = ({
   const [showPrompt, setShowPrompt] = useState<boolean>(false);
   const [systemPrompt, setSystemPrompt] = useState<string>(activeAgent.system_instruction);
   const [showKeys, setShowKeys] = useState<boolean>(false);
+
+  // Active Agent Inline Dossier Customization State
+  const [showDossierEditor, setShowDossierEditor] = useState<boolean>(false);
+  const [monoTone, setMonoTone] = useState<string>('');
+  const [monoConstraints, setMonoConstraints] = useState<string[]>([]);
+  const [newMonoConstraint, setNewMonoConstraint] = useState<string>('');
+  const [isMonoCustomized, setIsMonoCustomized] = useState<boolean>(false);
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem('mythos_agent_overrides');
+      const all = raw ? JSON.parse(raw) : {};
+      const override = all[activeAgent.id];
+      if (override) {
+        setIsMonoCustomized(true);
+        setMonoTone(override.tone !== undefined ? override.tone : activeAgent.meta.tone);
+        setMonoConstraints(override.constraints !== undefined ? [...override.constraints] : [...activeAgent.meta.constraints]);
+      } else {
+        setIsMonoCustomized(false);
+        setMonoTone(activeAgent.meta.tone);
+        setMonoConstraints([...activeAgent.meta.constraints]);
+      }
+    } catch {
+      setIsMonoCustomized(false);
+      setMonoTone(activeAgent.meta.tone);
+      setMonoConstraints([...activeAgent.meta.constraints]);
+    }
+  }, [agentId, activeAgent]);
+
+  const handleSaveMonoDossier = () => {
+    try {
+      const raw = localStorage.getItem('mythos_agent_overrides');
+      const all = raw ? JSON.parse(raw) : {};
+      const cleanedTone = monoTone.trim();
+      const cleanedConstraints = monoConstraints.map((c) => c.trim()).filter(Boolean);
+      all[activeAgent.id] = {
+        tone: cleanedTone || activeAgent.meta.tone,
+        constraints: cleanedConstraints,
+      };
+      localStorage.setItem('mythos_agent_overrides', JSON.stringify(all));
+      setIsMonoCustomized(true);
+      addLog(`Saved dossier customization for ${activeAgent.handle} (Port ${activeAgent.port})`, 'SYS', 'ok');
+    } catch (err: any) {
+      addLog(`Failed to save dossier: ${err.message || err}`, 'SYS', 'err');
+    }
+  };
+
+  const handleResetMonoDossier = () => {
+    try {
+      const raw = localStorage.getItem('mythos_agent_overrides');
+      const all = raw ? JSON.parse(raw) : {};
+      delete all[activeAgent.id];
+      localStorage.setItem('mythos_agent_overrides', JSON.stringify(all));
+      setIsMonoCustomized(false);
+      setMonoTone(activeAgent.meta.tone);
+      setMonoConstraints([...activeAgent.meta.constraints]);
+      addLog(`Reset dossier for ${activeAgent.handle} to canonical defaults`, 'SYS', 'ok');
+    } catch (err: any) {
+      addLog(`Failed to reset dossier: ${err.message || err}`, 'SYS', 'err');
+    }
+  };
 
   // Parallel API Keys (K1, K2, K3)
   const [k1, setK1] = useState<string>(customApiKeys[0] || '');
@@ -176,13 +236,11 @@ export const MonolithicView: React.FC<MonolithicViewProps> = ({
       addLog(`Failed to fetch models: ${err.message}`, 'SYS', 'err');
       // If fetching fails entirely (e.g. invalid key or cors), fall back to sensible defaults
       setAvailableModels([
-        'gemini-3.6-flash',
         'gemini-3.8-flash',
-        'gemini-3-flash-preview',
+        'gemini-3.1-flash-lite',
         'gemini-3.1-pro-preview',
         'gemini-2.5-pro',
-        'gemini-1.5-flash',
-        'gemini-1.5-pro'
+        'gemini-2.5-flash'
       ]);
       setGenerationModel('gemini-3.8-flash');
     } finally {
@@ -510,6 +568,175 @@ export const MonolithicView: React.FC<MonolithicViewProps> = ({
                     </option>
                   ))}
                 </select>
+
+                {/* Inline Dossier Editor Toggle */}
+                <div className="border border-[#2a2a2a] bg-[#121212] p-2 flex flex-col gap-2">
+                  <div
+                    onClick={() => setShowDossierEditor(!showDossierEditor)}
+                    className="flex items-center justify-between cursor-pointer select-none text-[10px] text-[#a0a0a0] hover:text-[#ff3300]"
+                  >
+                    <span className="flex items-center gap-1">
+                      <Edit3 className="w-3 h-3 text-[#ff3300]" />
+                      <span className="uppercase font-bold tracking-wider">
+                        {showDossierEditor ? '[-] DOSSIER & CONSTRAINTS' : '[+] DOSSIER & CONSTRAINTS'}
+                      </span>
+                    </span>
+                    {isMonoCustomized && (
+                      <span className="text-[9px] text-[#ffaa00] font-mono">[CUSTOM]</span>
+                    )}
+                  </div>
+
+                  {showDossierEditor && (
+                    <div className="flex flex-col gap-2 pt-1 border-t border-[#222222]">
+                      {/* Persona Preset Quick Selector */}
+                      <div className="flex flex-col gap-1">
+                        <label className="text-[9px] uppercase tracking-wider text-[#777777] flex items-center justify-between">
+                          <span className="flex items-center gap-1">
+                            <Bookmark className="w-2.5 h-2.5 text-[#ff3300]" />
+                            <span>Persona Presets:</span>
+                          </span>
+                        </label>
+                        <select
+                          onChange={(e) => {
+                            if (!e.target.value) return;
+                            try {
+                              const saved = localStorage.getItem('mythos_persona_presets');
+                              const custom: PersonaPreset[] = saved ? JSON.parse(saved) : [];
+                              const all = [...DEFAULT_PERSONA_PRESETS, ...custom];
+                              const found = all.find((p) => p.id === e.target.value);
+                              if (found) {
+                                setMonoTone(found.tone);
+                                setMonoConstraints([...found.constraints]);
+                                addLog(`Loaded preset "${found.name}"`, 'SYS', 'ok');
+                              }
+                            } catch (err: any) {
+                              addLog(`Failed to load preset: ${err.message || err}`, 'SYS', 'err');
+                            }
+                          }}
+                          defaultValue=""
+                          className="w-full bg-[#1a1a1a] border border-[#333333] text-[#e0e0e0] px-2 py-1 text-[10px] font-mono focus:border-[#ff3300] outline-none"
+                        >
+                          <option value="" disabled>-- Load a Persona Preset --</option>
+                          {(() => {
+                            try {
+                              const saved = localStorage.getItem('mythos_persona_presets');
+                              const custom: PersonaPreset[] = saved ? JSON.parse(saved) : [];
+                              const all = [...DEFAULT_PERSONA_PRESETS, ...custom];
+                              return all.map((p) => (
+                                <option key={p.id} value={p.id}>
+                                  {p.name} {p.builtIn ? '(Built-in)' : '(Custom)'}
+                                </option>
+                              ));
+                            } catch {
+                              return DEFAULT_PERSONA_PRESETS.map((p) => (
+                                <option key={p.id} value={p.id}>
+                                  {p.name} (Built-in)
+                                </option>
+                              ));
+                            }
+                          })()}
+                        </select>
+                      </div>
+
+                      {/* Persona Tone */}
+                      <div className="flex flex-col gap-1">
+                        <label className="text-[9px] uppercase tracking-wider text-[#777777]">Persona Tone:</label>
+                        <input
+                          type="text"
+                          value={monoTone}
+                          onChange={(e) => setMonoTone(e.target.value)}
+                          placeholder="e.g. formal, analytical, terse..."
+                          className="w-full bg-[#1a1a1a] border border-[#333333] text-[#e0e0e0] px-2 py-1 text-[11px] font-mono focus:border-[#ff3300] outline-none"
+                        />
+                      </div>
+
+                      {/* Constraints List */}
+                      <div className="flex flex-col gap-1">
+                        <label className="text-[9px] uppercase tracking-wider text-[#777777]">
+                          Constraints ({monoConstraints.length}):
+                        </label>
+                        <div className="space-y-1 max-h-32 overflow-y-auto">
+                          {monoConstraints.map((c, idx) => (
+                            <div key={idx} className="flex items-center gap-1 bg-[#181818] p-1 border border-[#2a2a2a]">
+                              <input
+                                type="text"
+                                value={c}
+                                onChange={(e) => {
+                                  const updated = [...monoConstraints];
+                                  updated[idx] = e.target.value;
+                                  setMonoConstraints(updated);
+                                }}
+                                className="flex-1 bg-transparent text-[#cccccc] text-[10px] font-mono outline-none"
+                              />
+                              <button
+                                type="button"
+                                onClick={() => setMonoConstraints((prev) => prev.filter((_, i) => i !== idx))}
+                                className="text-[#666666] hover:text-[#ff3300] p-0.5"
+                                title="Remove"
+                              >
+                                <Trash2 className="w-3 h-3" />
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+
+                        {/* Add constraint row */}
+                        <div className="flex items-center gap-1 mt-0.5">
+                          <input
+                            type="text"
+                            value={newMonoConstraint}
+                            onChange={(e) => setNewMonoConstraint(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter' && newMonoConstraint.trim()) {
+                                e.preventDefault();
+                                setMonoConstraints((prev) => [...prev, newMonoConstraint.trim()]);
+                                setNewMonoConstraint('');
+                              }
+                            }}
+                            placeholder="Add constraint (Enter)..."
+                            className="flex-1 bg-[#1a1a1a] border border-[#333333] text-[#e0e0e0] px-2 py-1 text-[10px] font-mono focus:border-[#ff3300] outline-none"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (newMonoConstraint.trim()) {
+                                setMonoConstraints((prev) => [...prev, newMonoConstraint.trim()]);
+                                setNewMonoConstraint('');
+                              }
+                            }}
+                            disabled={!newMonoConstraint.trim()}
+                            className="bg-[#2a2a2a] hover:bg-[#3a3a3a] disabled:opacity-40 text-white px-2 py-1 text-[10px] uppercase font-bold"
+                          >
+                            +
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Action buttons */}
+                      <div className="flex items-center justify-between gap-1 pt-1">
+                        <button
+                          type="button"
+                          onClick={handleSaveMonoDossier}
+                          className="bg-[#ff3300] hover:bg-[#ff4411] text-black font-bold text-[10px] uppercase px-2.5 py-1 flex items-center gap-1"
+                        >
+                          <Save className="w-2.5 h-2.5" />
+                          <span>Save</span>
+                        </button>
+
+                        {isMonoCustomized && (
+                          <button
+                            type="button"
+                            onClick={handleResetMonoDossier}
+                            className="text-[#888888] hover:text-white border border-[#333333] text-[9px] uppercase px-2 py-1 flex items-center gap-1"
+                          >
+                            <RotateCcw className="w-2.5 h-2.5" />
+                            <span>Reset Defaults</span>
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
               </div>
             )}
           </div>

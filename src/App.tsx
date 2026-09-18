@@ -37,8 +37,89 @@ import {
   ChevronRight,
   X,
   Trash2,
-  Settings
+  Settings,
+  Edit3,
+  Save,
+  RotateCcw,
+  Plus,
+  Sparkles,
+  Bookmark,
+  BookmarkPlus,
+  Check
 } from 'lucide-react';
+
+export interface AgentCustomOverride {
+  tone?: string;
+  constraints?: string[];
+  description?: string;
+}
+
+export interface PersonaPreset {
+  id: string;
+  name: string;
+  tone: string;
+  constraints: string[];
+  builtIn?: boolean;
+  createdAt?: number;
+}
+
+export const DEFAULT_PERSONA_PRESETS: PersonaPreset[] = [
+  {
+    id: 'preset-chronologist',
+    name: 'Strict Chronologist',
+    tone: 'formal, chronological, neutral',
+    constraints: [
+      'Strictly verify timeline timestamps',
+      'Do not speculate beyond lore records',
+      'Maintain neutral third-person perspective',
+    ],
+    builtIn: true,
+  },
+  {
+    id: 'preset-systems-architect',
+    name: 'Systems Architect',
+    tone: 'concise, analytical, terse',
+    constraints: [
+      'Strictly output valid JSON format',
+      'No pleasantries or conversational filler',
+      'Enforce deterministic schemas across payloads',
+    ],
+    builtIn: true,
+  },
+  {
+    id: 'preset-lorekeeper',
+    name: 'Mythos Lorekeeper',
+    tone: 'mythological, narrative, expansive',
+    constraints: [
+      'Preserve mythological framing and titles',
+      'Synthesize multi-agent lore relationships',
+      'Maintain canonical entity consistency',
+    ],
+    builtIn: true,
+  },
+  {
+    id: 'preset-security-sentinel',
+    name: 'Security Sentinel',
+    tone: 'strict, defensive, audit-focused',
+    constraints: [
+      'Enforce access-control policy boundaries',
+      'Reject unverified provenance claims',
+      'Flag contradictory memory assertions',
+    ],
+    builtIn: true,
+  },
+  {
+    id: 'preset-diplomatic-liaison',
+    name: 'Diplomatic Liaison',
+    tone: 'tactful, formal, conciliatory',
+    constraints: [
+      'Highlight treaty clauses and mutual concessions',
+      'Maintain diplomatic neutrality between factions',
+      'Attribute all statements to authorized delegates',
+    ],
+    builtIn: true,
+  },
+];
 
 export default function App() {
   // Core Engine References
@@ -92,6 +173,176 @@ export default function App() {
   const [agentHandle, setAgentHandle] = useState<string>(DEFAULT_CANONICAL_AGENT.handle);
   const [showAgentDetails, setShowAgentDetails] = useState<boolean>(false);
   const [stats, setStats] = useState<{ totalNodes: number; totalEdges: number }>({ totalNodes: 0, totalEdges: 0 });
+
+  // Custom Agent Overrides (Inline Edit for Persona Tone & Architectural Constraints)
+  const [agentOverrides, setAgentOverrides] = useState<Record<string, AgentCustomOverride>>(() => {
+    try {
+      const saved = localStorage.getItem('mythos_agent_overrides');
+      return saved ? JSON.parse(saved) : {};
+    } catch {
+      return {};
+    }
+  });
+
+  const [isEditingDossier, setIsEditingDossier] = useState<boolean>(false);
+  const [editTone, setEditTone] = useState<string>('');
+  const [editConstraints, setEditConstraints] = useState<string[]>([]);
+  const [newConstraintInput, setNewConstraintInput] = useState<string>('');
+
+  // Persona Presets State & Handlers
+  const [personaPresets, setPersonaPresets] = useState<PersonaPreset[]>(() => {
+    try {
+      const saved = localStorage.getItem('mythos_persona_presets');
+      const custom: PersonaPreset[] = saved ? JSON.parse(saved) : [];
+      return [...DEFAULT_PERSONA_PRESETS, ...custom];
+    } catch {
+      return [...DEFAULT_PERSONA_PRESETS];
+    }
+  });
+  const [isCreatingPreset, setIsCreatingPreset] = useState<boolean>(false);
+  const [newPresetName, setNewPresetName] = useState<string>('');
+  const [selectedPresetId, setSelectedPresetId] = useState<string>('');
+  const [showPresetManager, setShowPresetManager] = useState<boolean>(false);
+
+  const handleApplyPreset = (preset: PersonaPreset) => {
+    setEditTone(preset.tone);
+    setEditConstraints([...preset.constraints]);
+    setSelectedPresetId(preset.id);
+    log(`[PERSONA_PRESET]: Applied preset "${preset.name}" (${preset.constraints.length} constraints).`);
+  };
+
+  const handleSaveCurrentAsPreset = () => {
+    const trimmed = newPresetName.trim();
+    if (!trimmed) return;
+
+    const newPreset: PersonaPreset = {
+      id: `preset-custom-${Date.now()}`,
+      name: trimmed,
+      tone: editTone.trim(),
+      constraints: editConstraints.map((c) => c.trim()).filter(Boolean),
+      builtIn: false,
+      createdAt: Date.now(),
+    };
+
+    setPersonaPresets((prev) => {
+      const customOnly = prev.filter((p) => !p.builtIn);
+      const updatedCustom = [...customOnly, newPreset];
+      try {
+        localStorage.setItem('mythos_persona_presets', JSON.stringify(updatedCustom));
+      } catch (err) {
+        console.error('Failed to persist custom persona presets', err);
+      }
+      return [...DEFAULT_PERSONA_PRESETS, ...updatedCustom];
+    });
+
+    setSelectedPresetId(newPreset.id);
+    setNewPresetName('');
+    setIsCreatingPreset(false);
+    log(`[PERSONA_PRESET]: Created and saved custom preset "${trimmed}".`);
+  };
+
+  const handleDeleteCustomPreset = (presetId: string) => {
+    setPersonaPresets((prev) => {
+      const filtered = prev.filter((p) => p.id !== presetId);
+      const customOnly = filtered.filter((p) => !p.builtIn);
+      try {
+        localStorage.setItem('mythos_persona_presets', JSON.stringify(customOnly));
+      } catch (err) {
+        console.error('Failed to update custom persona presets', err);
+      }
+      return filtered;
+    });
+    if (selectedPresetId === presetId) {
+      setSelectedPresetId('');
+    }
+    log(`[PERSONA_PRESET]: Removed custom preset.`);
+  };
+
+  const getEffectiveAgent = (id: string) => {
+    const base = getCanonicalAgentById(id) || DEFAULT_CANONICAL_AGENT;
+    const override = agentOverrides[base.id] || agentOverrides[id];
+    if (!override) return base;
+    return {
+      ...base,
+      meta: {
+        ...base.meta,
+        tone: override.tone !== undefined ? override.tone : base.meta.tone,
+        constraints: override.constraints !== undefined ? override.constraints : base.meta.constraints,
+        description: override.description !== undefined ? override.description : base.meta.description,
+      },
+    };
+  };
+
+  const startEditingDossier = (targetId: string) => {
+    const agent = getEffectiveAgent(targetId);
+    setEditTone(agent.meta.tone);
+    setEditConstraints([...agent.meta.constraints]);
+    setNewConstraintInput('');
+    setIsEditingDossier(true);
+  };
+
+  const handleSaveDossier = (targetId: string) => {
+    const base = getCanonicalAgentById(targetId) || DEFAULT_CANONICAL_AGENT;
+    const cleanedTone = editTone.trim();
+    const cleanedConstraints = editConstraints.map((c) => c.trim()).filter(Boolean);
+
+    setAgentOverrides((prev) => {
+      const updated = {
+        ...prev,
+        [base.id]: {
+          tone: cleanedTone || base.meta.tone,
+          constraints: cleanedConstraints,
+        },
+      };
+      try {
+        localStorage.setItem('mythos_agent_overrides', JSON.stringify(updated));
+      } catch (err) {
+        console.error('Failed to save agent overrides', err);
+      }
+      return updated;
+    });
+
+    setIsEditingDossier(false);
+    log(`[AGENT_DOSSIER]: Updated persona tone and constraints for ${base.handle} (${base.id}).`);
+  };
+
+  const handleResetDossier = (targetId: string) => {
+    const base = getCanonicalAgentById(targetId) || DEFAULT_CANONICAL_AGENT;
+    setAgentOverrides((prev) => {
+      const updated = { ...prev };
+      delete updated[base.id];
+      delete updated[targetId];
+      try {
+        localStorage.setItem('mythos_agent_overrides', JSON.stringify(updated));
+      } catch (err) {
+        console.error('Failed to clear agent overrides', err);
+      }
+      return updated;
+    });
+
+    setEditTone(base.meta.tone);
+    setEditConstraints([...base.meta.constraints]);
+    setIsEditingDossier(false);
+    log(`[AGENT_DOSSIER]: Reverted ${base.handle} (${base.id}) to canonical defaults.`);
+  };
+
+  const handleAddConstraint = () => {
+    if (!newConstraintInput.trim()) return;
+    setEditConstraints((prev) => [...prev, newConstraintInput.trim()]);
+    setNewConstraintInput('');
+  };
+
+  const handleRemoveConstraint = (indexToRemove: number) => {
+    setEditConstraints((prev) => prev.filter((_, i) => i !== indexToRemove));
+  };
+
+  const handleUpdateConstraint = (index: number, value: string) => {
+    setEditConstraints((prev) => {
+      const updated = [...prev];
+      updated[index] = value;
+      return updated;
+    });
+  };
 
   // Core Test Suite State
   const [testState, setTestState] = useState<TestSuiteState>({
@@ -1202,9 +1453,14 @@ export default function App() {
 
           {/* Canonical Agent Specification Dossier */}
           {(() => {
-            const activeAgent = getCanonicalAgentById(agentId) || DEFAULT_CANONICAL_AGENT;
+            const activeAgent = getEffectiveAgent(agentId);
+            const isCustomized = !!agentOverrides[activeAgent.id];
+
             return (
-              <div className="bg-neutral-900 border border-neutral-800 rounded p-4 flex flex-col gap-3">
+              <div className={`bg-neutral-900 border rounded p-4 flex flex-col gap-3 transition-colors ${
+                isEditingDossier ? 'border-emerald-500/60 shadow-lg shadow-emerald-950/30' : 'border-neutral-800'
+              }`}>
+                {/* Dossier Header Bar */}
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-neutral-800 pb-3">
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="px-2 py-0.5 rounded bg-emerald-950/80 border border-emerald-800 text-[11px] font-mono font-bold text-emerald-400">
@@ -1216,11 +1472,41 @@ export default function App() {
                     <span className="text-xs text-neutral-400">
                       — {activeAgent.role}
                     </span>
+                    {isCustomized && (
+                      <span className="px-2 py-0.5 bg-amber-950/70 border border-amber-700 text-[9px] font-mono font-bold text-amber-400 uppercase tracking-wider rounded">
+                        CUSTOMIZED
+                      </span>
+                    )}
                   </div>
-                  <div className="flex items-center gap-2 self-start sm:self-auto">
+                  
+                  <div className="flex flex-wrap items-center gap-2 self-start sm:self-auto">
                     <span className="text-[10px] font-mono text-neutral-500 bg-neutral-950 px-2 py-0.5 border border-neutral-800 rounded">
                       rev: {activeAgent.revision}
                     </span>
+                    
+                    {!isEditingDossier ? (
+                      <button
+                        type="button"
+                        id="editDossierBtn"
+                        onClick={() => startEditingDossier(activeAgent.id)}
+                        className="text-[10px] uppercase font-bold tracking-wider px-2.5 py-1 bg-emerald-950/80 hover:bg-emerald-900 border border-emerald-700/80 text-emerald-300 rounded transition-colors flex items-center gap-1.5 cursor-pointer"
+                        title="Inline Edit Active Agent Persona Tone & Constraints"
+                      >
+                        <Edit3 className="w-3 h-3" />
+                        <span>Edit Dossier</span>
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        id="cancelDossierEditBtn"
+                        onClick={() => setIsEditingDossier(false)}
+                        className="text-[10px] uppercase font-bold tracking-wider px-2.5 py-1 bg-neutral-800 hover:bg-neutral-700 text-neutral-300 rounded transition-colors flex items-center gap-1 cursor-pointer"
+                      >
+                        <X className="w-3 h-3" />
+                        <span>Cancel</span>
+                      </button>
+                    )}
+
                     <button
                       type="button"
                       onClick={() => setShowAgentDetails(!showAgentDetails)}
@@ -1231,35 +1517,391 @@ export default function App() {
                   </div>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
-                  <div className="bg-neutral-950 p-2.5 rounded border border-neutral-800/80">
-                    <span className="text-[10px] uppercase tracking-wider text-neutral-500 block font-semibold mb-1">
-                      Persona Tone
-                    </span>
-                    <p className="text-neutral-300 italic text-[11px] leading-relaxed">
-                      &ldquo;{activeAgent.meta.tone}&rdquo;
-                    </p>
-                  </div>
-                  <div className="bg-neutral-950 p-2.5 rounded border border-neutral-800/80">
-                    <span className="text-[10px] uppercase tracking-wider text-neutral-500 block font-semibold mb-1">
-                      Lore Policy
-                    </span>
-                    <div className="text-neutral-300 font-mono text-[11px] space-y-0.5">
-                      <div><span className="text-emerald-400 font-semibold">READ:</span> [{activeAgent.lore_policy.read.join(', ')}]</div>
-                      <div><span className="text-blue-400 font-semibold">WRITE:</span> [{activeAgent.lore_policy.write.join(', ')}]</div>
+                {/* Inline Edit Form */}
+                {isEditingDossier ? (
+                  <div className="bg-neutral-950 p-3.5 rounded border border-emerald-800/60 flex flex-col gap-4">
+                    <div className="flex items-center justify-between border-b border-neutral-800 pb-2">
+                      <div className="flex items-center gap-2">
+                        <Sparkles className="w-3.5 h-3.5 text-emerald-400" />
+                        <span className="text-xs font-bold text-emerald-400 uppercase tracking-wider">
+                          INLINE DOSSIER EDITOR — {activeAgent.handle}
+                        </span>
+                      </div>
+                      <span className="text-[10px] text-neutral-500">Changes apply immediately to this workspace</span>
+                    </div>
+
+                    {/* Persona Presets Section */}
+                    <div className="bg-neutral-900/90 border border-neutral-800 rounded p-3 flex flex-col gap-2.5">
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                        <div className="flex items-center gap-1.5">
+                          <Bookmark className="w-3.5 h-3.5 text-blue-400" />
+                          <span className="text-[11px] font-bold text-white uppercase tracking-wider">
+                            Persona Presets
+                          </span>
+                          <span className="text-[10px] text-neutral-400">
+                            ({personaPresets.length} available)
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            id="saveCurrentAsPresetBtn"
+                            onClick={() => setIsCreatingPreset(!isCreatingPreset)}
+                            className="text-[10px] uppercase font-bold tracking-wider px-2.5 py-1 bg-blue-950/70 hover:bg-blue-900/90 border border-blue-800/80 text-blue-300 rounded flex items-center gap-1 transition-colors cursor-pointer"
+                            title="Save current tone and constraints as a reusable preset"
+                          >
+                            <BookmarkPlus className="w-3 h-3" />
+                            <span>{isCreatingPreset ? 'Cancel Save' : 'Save As Preset'}</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setShowPresetManager(!showPresetManager)}
+                            className="text-[10px] uppercase font-bold tracking-wider px-2 py-1 bg-neutral-800 hover:bg-neutral-700 text-neutral-300 rounded transition-colors cursor-pointer"
+                          >
+                            {showPresetManager ? 'Hide List' : 'Manage'}
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Presets Pills Selector */}
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        {personaPresets.map((preset) => {
+                          const isSelected = selectedPresetId === preset.id;
+                          return (
+                            <button
+                              key={preset.id}
+                              type="button"
+                              onClick={() => handleApplyPreset(preset)}
+                              className={`text-[10px] px-2.5 py-1 rounded font-mono transition-all flex items-center gap-1.5 cursor-pointer border ${
+                                isSelected
+                                  ? 'bg-blue-600 border-blue-400 text-white font-bold shadow-sm'
+                                  : 'bg-neutral-950 hover:bg-neutral-800 text-neutral-300 border-neutral-800 hover:border-neutral-700'
+                              }`}
+                              title={`Tone: "${preset.tone}" (${preset.constraints.length} constraints)`}
+                            >
+                              {isSelected && <Check className="w-3 h-3 text-white" />}
+                              <span>{preset.name}</span>
+                              {!preset.builtIn && (
+                                <span className="text-[8px] uppercase tracking-wider text-amber-400 bg-amber-950/60 px-1 rounded border border-amber-800/60">
+                                  custom
+                                </span>
+                              )}
+                            </button>
+                          );
+                        })}
+                      </div>
+
+                      {/* Create New Preset Sub-form */}
+                      {isCreatingPreset && (
+                        <div className="mt-1 bg-neutral-950 p-2.5 rounded border border-blue-900/60 flex flex-col gap-2 animate-fadeIn">
+                          <div className="flex items-center justify-between">
+                            <span className="text-[10px] uppercase tracking-wider text-blue-400 font-bold">
+                              Save Current Persona Setup as Named Preset
+                            </span>
+                            <span className="text-[9px] text-neutral-500">
+                              {editConstraints.length} rules staged
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <input
+                              type="text"
+                              value={newPresetName}
+                              onChange={(e) => setNewPresetName(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') {
+                                  e.preventDefault();
+                                  handleSaveCurrentAsPreset();
+                                }
+                              }}
+                              placeholder="e.g., Forensic Incident Analyst, Creative Lore Sculptor..."
+                              className="flex-1 bg-neutral-900 border border-neutral-700 text-neutral-100 px-2.5 py-1.5 text-xs rounded font-mono focus:border-blue-500 outline-none"
+                              autoFocus
+                            />
+                            <button
+                              type="button"
+                              onClick={handleSaveCurrentAsPreset}
+                              disabled={!newPresetName.trim()}
+                              className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-40 text-white text-xs font-bold rounded flex items-center gap-1 transition-colors cursor-pointer"
+                            >
+                              <Save className="w-3 h-3" />
+                              <span>Save Preset</span>
+                            </button>
+                          </div>
+                          <div className="text-[10px] text-neutral-400 font-mono truncate">
+                            <span className="text-neutral-500">Tone preview:</span> &ldquo;{editTone || 'Default'}&rdquo;
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Manage Presets Expanded Drawer */}
+                      {showPresetManager && (
+                        <div className="mt-1 bg-neutral-950 p-2.5 rounded border border-neutral-800 flex flex-col gap-2 max-h-56 overflow-y-auto">
+                          <span className="text-[10px] uppercase tracking-wider text-neutral-400 font-bold">
+                            Preset Registry & Management
+                          </span>
+                          <div className="space-y-1.5">
+                            {personaPresets.map((preset) => (
+                              <div
+                                key={preset.id}
+                                className="bg-neutral-900 p-2 rounded border border-neutral-800 flex flex-col sm:flex-row sm:items-center justify-between gap-2"
+                              >
+                                <div className="flex flex-col gap-0.5 min-w-0 flex-1">
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-xs font-bold text-white font-mono">{preset.name}</span>
+                                    {preset.builtIn ? (
+                                      <span className="text-[8px] uppercase tracking-wider text-neutral-500 bg-neutral-800 px-1 py-0.5 rounded">
+                                        built-in
+                                      </span>
+                                    ) : (
+                                      <span className="text-[8px] uppercase tracking-wider text-amber-400 bg-amber-950 px-1 py-0.5 rounded border border-amber-800">
+                                        custom
+                                      </span>
+                                    )}
+                                  </div>
+                                  <p className="text-[10px] text-neutral-400 italic truncate">&ldquo;{preset.tone}&rdquo;</p>
+                                  <p className="text-[9px] text-neutral-500 font-mono">
+                                    {preset.constraints.length} constraint{preset.constraints.length === 1 ? '' : 's'}: {preset.constraints.join(' • ')}
+                                  </p>
+                                </div>
+                                <div className="flex items-center gap-1.5 shrink-0">
+                                  <button
+                                    type="button"
+                                    onClick={() => handleApplyPreset(preset)}
+                                    className="px-2 py-1 bg-neutral-800 hover:bg-neutral-700 text-neutral-200 text-[10px] font-bold rounded transition-colors cursor-pointer"
+                                  >
+                                    Load
+                                  </button>
+                                  {!preset.builtIn && (
+                                    <button
+                                      type="button"
+                                      onClick={() => handleDeleteCustomPreset(preset.id)}
+                                      className="p-1 text-neutral-500 hover:text-rose-400 transition-colors cursor-pointer"
+                                      title="Delete custom preset"
+                                    >
+                                      <Trash2 className="w-3.5 h-3.5" />
+                                    </button>
+                                  )}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Persona Tone Editor */}
+                    <div className="flex flex-col gap-1.5">
+                      <div className="flex items-center justify-between">
+                        <label htmlFor="editPersonaTone" className="text-[10px] uppercase tracking-wider text-neutral-400 font-bold">
+                          Persona Tone & Mannerism:
+                        </label>
+                        <span className="text-[9px] text-neutral-500">{editTone.length} chars</span>
+                      </div>
+                      <input
+                        id="editPersonaTone"
+                        type="text"
+                        value={editTone}
+                        onChange={(e) => setEditTone(e.target.value)}
+                        placeholder="e.g. formal, chronological, neutral, highly analytical..."
+                        className="w-full bg-neutral-900 border border-neutral-700 text-neutral-100 px-3 py-2 text-xs rounded font-mono focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 outline-none"
+                      />
+                      {/* Tone presets */}
+                      <div className="flex flex-wrap items-center gap-1.5 mt-1">
+                        <span className="text-[9px] text-neutral-500 mr-1">PRESETS:</span>
+                        {[
+                          'formal, chronological, neutral',
+                          'concise, analytical, terse',
+                          'creative, philosophical, expansive',
+                          'strict, security-minded, defensive',
+                          'conversational, empathetic, helpful'
+                        ].map((preset) => (
+                          <button
+                            key={preset}
+                            type="button"
+                            onClick={() => setEditTone(preset)}
+                            className="text-[9px] px-2 py-0.5 bg-neutral-900 hover:bg-neutral-800 text-neutral-400 hover:text-neutral-200 border border-neutral-800 rounded transition-colors cursor-pointer"
+                          >
+                            {preset.split(',')[0]}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Architectural Constraints Editor */}
+                    <div className="flex flex-col gap-2">
+                      <div className="flex items-center justify-between">
+                        <label className="text-[10px] uppercase tracking-wider text-neutral-400 font-bold">
+                          Architectural Constraints ({editConstraints.length}):
+                        </label>
+                        <span className="text-[9px] text-neutral-500">Rules strictly enforced on agent output</span>
+                      </div>
+
+                      {/* Constraint Items List */}
+                      <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
+                        {editConstraints.length === 0 ? (
+                          <div className="text-[11px] text-neutral-500 italic p-2 bg-neutral-900/50 rounded border border-dashed border-neutral-800 text-center">
+                            No active constraints. Add one below to guide agent boundaries.
+                          </div>
+                        ) : (
+                          editConstraints.map((constraint, idx) => (
+                            <div key={idx} className="flex items-center gap-2 bg-neutral-900 p-1.5 rounded border border-neutral-800">
+                              <span className="text-[10px] text-neutral-500 font-mono w-4 text-center">{idx + 1}.</span>
+                              <input
+                                type="text"
+                                value={constraint}
+                                onChange={(e) => handleUpdateConstraint(idx, e.target.value)}
+                                className="flex-1 bg-transparent text-neutral-200 text-xs font-mono outline-none border-b border-transparent focus:border-emerald-500/60 px-1"
+                              />
+                              <button
+                                type="button"
+                                onClick={() => handleRemoveConstraint(idx)}
+                                className="text-neutral-500 hover:text-rose-400 p-1 rounded transition-colors cursor-pointer"
+                                title="Remove constraint"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          ))
+                        )}
+                      </div>
+
+                      {/* Add New Constraint Input */}
+                      <div className="flex items-center gap-2 mt-1">
+                        <input
+                          id="newConstraintInput"
+                          type="text"
+                          value={newConstraintInput}
+                          onChange={(e) => setNewConstraintInput(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              e.preventDefault();
+                              handleAddConstraint();
+                            }
+                          }}
+                          placeholder="Add new architectural constraint (press Enter)..."
+                          className="flex-1 bg-neutral-900 border border-neutral-700 text-neutral-100 px-3 py-1.5 text-xs rounded font-mono focus:border-emerald-500 outline-none"
+                        />
+                        <button
+                          type="button"
+                          id="addConstraintBtn"
+                          onClick={handleAddConstraint}
+                          disabled={!newConstraintInput.trim()}
+                          className="px-3 py-1.5 bg-neutral-800 hover:bg-neutral-700 disabled:opacity-40 text-neutral-200 text-xs font-bold rounded flex items-center gap-1 transition-colors cursor-pointer"
+                        >
+                          <Plus className="w-3.5 h-3.5" />
+                          <span>Add</span>
+                        </button>
+                      </div>
+
+                      {/* Suggested quick constraints */}
+                      <div className="flex flex-wrap items-center gap-1.5 mt-1">
+                        <span className="text-[9px] text-neutral-500 mr-1">SUGGESTIONS:</span>
+                        {[
+                          'Cannot generate ungrounded claims',
+                          'Strictly output valid JSON format',
+                          'Do not speculate beyond lore records',
+                          'Maintain neutral third-person perspective',
+                          'Include timestamps for all state transitions'
+                        ].map((sugg) => (
+                          <button
+                            key={sugg}
+                            type="button"
+                            onClick={() => {
+                              if (!editConstraints.includes(sugg)) {
+                                setEditConstraints((prev) => [...prev, sugg]);
+                              }
+                            }}
+                            className="text-[9px] px-2 py-0.5 bg-neutral-900/80 hover:bg-neutral-800 text-neutral-400 hover:text-emerald-300 border border-neutral-800 rounded transition-colors cursor-pointer"
+                          >
+                            + {sugg}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Actions Bar */}
+                    <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2 pt-2 border-t border-neutral-800">
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          id="saveDossierBtn"
+                          onClick={() => handleSaveDossier(activeAgent.id)}
+                          className="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded flex items-center justify-center gap-1.5 transition-colors cursor-pointer shadow"
+                        >
+                          <Save className="w-3.5 h-3.5" />
+                          <span>Save Dossier Changes</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setIsEditingDossier(false)}
+                          className="px-3 py-1.5 bg-neutral-800 hover:bg-neutral-700 text-neutral-300 text-xs rounded transition-colors cursor-pointer"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+
+                      {isCustomized && (
+                        <button
+                          type="button"
+                          id="resetDossierBtn"
+                          onClick={() => handleResetDossier(activeAgent.id)}
+                          className="px-3 py-1.5 bg-amber-950/40 hover:bg-amber-900/60 border border-amber-800/80 text-amber-400 text-xs font-bold rounded flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                          title="Restore factory default tone and constraints from canonical roster"
+                        >
+                          <RotateCcw className="w-3 h-3" />
+                          <span>Reset to Canonical Defaults</span>
+                        </button>
+                      )}
                     </div>
                   </div>
-                  <div className="bg-neutral-950 p-2.5 rounded border border-neutral-800/80">
-                    <span className="text-[10px] uppercase tracking-wider text-neutral-500 block font-semibold mb-1">
-                      Architectural Constraints
-                    </span>
-                    <ul className="text-[11px] text-neutral-300 list-disc list-inside space-y-0.5">
-                      {activeAgent.meta.constraints.map((c, i) => (
-                        <li key={i} className="truncate" title={c}>{c}</li>
-                      ))}
-                    </ul>
+                ) : (
+                  /* Standard Read-Only Dossier Grid */
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
+                    <div 
+                      onClick={() => startEditingDossier(activeAgent.id)}
+                      className="bg-neutral-950 p-2.5 rounded border border-neutral-800/80 hover:border-neutral-700 transition-colors cursor-pointer group"
+                      title="Click to edit persona tone"
+                    >
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-[10px] uppercase tracking-wider text-neutral-500 block font-semibold">
+                          Persona Tone
+                        </span>
+                        <Edit3 className="w-2.5 h-2.5 text-neutral-600 group-hover:text-emerald-400 transition-colors" />
+                      </div>
+                      <p className="text-neutral-300 italic text-[11px] leading-relaxed">
+                        &ldquo;{activeAgent.meta.tone}&rdquo;
+                      </p>
+                    </div>
+
+                    <div className="bg-neutral-950 p-2.5 rounded border border-neutral-800/80">
+                      <span className="text-[10px] uppercase tracking-wider text-neutral-500 block font-semibold mb-1">
+                        Lore Policy
+                      </span>
+                      <div className="text-neutral-300 font-mono text-[11px] space-y-0.5">
+                        <div><span className="text-emerald-400 font-semibold">READ:</span> [{activeAgent.lore_policy.read.join(', ')}]</div>
+                        <div><span className="text-blue-400 font-semibold">WRITE:</span> [{activeAgent.lore_policy.write.join(', ')}]</div>
+                      </div>
+                    </div>
+
+                    <div 
+                      onClick={() => startEditingDossier(activeAgent.id)}
+                      className="bg-neutral-950 p-2.5 rounded border border-neutral-800/80 hover:border-neutral-700 transition-colors cursor-pointer group"
+                      title="Click to add or edit constraints"
+                    >
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-[10px] uppercase tracking-wider text-neutral-500 block font-semibold">
+                          Architectural Constraints ({activeAgent.meta.constraints.length})
+                        </span>
+                        <Edit3 className="w-2.5 h-2.5 text-neutral-600 group-hover:text-emerald-400 transition-colors" />
+                      </div>
+                      <ul className="text-[11px] text-neutral-300 list-disc list-inside space-y-0.5">
+                        {activeAgent.meta.constraints.map((c, i) => (
+                          <li key={i} className="truncate" title={c}>{c}</li>
+                        ))}
+                      </ul>
+                    </div>
                   </div>
-                </div>
+                )}
 
                 {showAgentDetails && (
                   <div className="bg-neutral-950 p-3.5 rounded border border-neutral-800 text-xs flex flex-col gap-2">
@@ -2151,11 +2793,14 @@ export default function App() {
       )}
 
       {/* Footer System Parameters */}
-      <footer className="border-t border-neutral-800 bg-neutral-900/50 px-4 py-1.5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 text-[9px] text-neutral-500 shrink-0">
-        <p className="uppercase tracking-widest font-mono">
+      <footer id="appFooter" className="border-t border-neutral-800 bg-neutral-900/50 px-4 py-2 flex flex-col md:flex-row items-center justify-between gap-2 text-[10px] text-neutral-500 shrink-0 font-mono">
+        <p className="uppercase tracking-widest text-[9px] text-center md:text-left">
           SYSTEM ENVIRONMENT: PRODUCTION PREVIEW CONSOLE — ALL SYSTEMS OPERATIONAL
         </p>
-        <p className="uppercase tracking-widest font-mono text-neutral-400">
+        <p className="text-neutral-300 font-semibold uppercase tracking-wider text-center">
+          &copy; 2026 MERK MORASSI
+        </p>
+        <p className="uppercase tracking-widest text-[9px] text-neutral-400 text-center md:text-right">
           POWERED BY GEMINI-3.8-FLASH &amp; LOCAL INDEXEDDB
         </p>
       </footer>
