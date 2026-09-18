@@ -4,7 +4,7 @@ LOREPACK FACTORY Stand alone Module
 **Portable LorePack generation, storage, retrieval, import, export, and graph tooling for MythOS.**
 
 **Status:** Development / Extraction Phase  
-**Architecture:** MythOS  
+**Architecture:** Mythos  
 **Owner:** Merk Morassi, LLC  
 **Principle:** ALL SIGNAL. NO NOISE.™
 
@@ -30,7 +30,7 @@ The Factory provides the machinery required to turn source material and conversa
 
 ## Architectural Role
 
-Within the MythOS architecture:
+Within the Mythos architecture:
 
 ```text
                  ┌───────────────┐
