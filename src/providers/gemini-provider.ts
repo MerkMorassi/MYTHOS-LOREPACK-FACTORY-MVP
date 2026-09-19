@@ -426,9 +426,8 @@ If no defensible relationship exists, return [].`;
         const key = this._getKey();
         const candidateModels = Array.from(new Set([
           modelName,
-          'gemini-3.8-flash',
-          'gemini-3.1-flash-lite',
-          'gemini-2.5-flash'
+          'gemini-3.6-flash',
+          'gemini-3.1-flash-lite'
         ])).filter(m => !m.startsWith('gemma-') || m === modelName);
 
         for (const m of candidateModels) {
@@ -503,9 +502,11 @@ If no defensible relationship exists, return [].`;
               .map((m: any) => (m.name || '').replace('models/', ''))
               .filter((name: string) => {
                 const lower = name.toLowerCase();
-                return (lower.startsWith('gemini-') || lower.startsWith('gemma-')) &&
-                  !lower.includes('embedding') &&
-                  !lower.includes('vision-preview');
+                // Allow all models except embedding, audio, vision, and imagen
+                return !lower.includes('embedding') &&
+                  !lower.includes('audio') &&
+                  !lower.includes('vision') &&
+                  !lower.includes('imagen');
               });
 
             if (generateModels.length > 0) {
@@ -531,32 +532,28 @@ If no defensible relationship exists, return [].`;
       }
 
       return [
-        'gemini-3.8-flash',
+        'gemini-3.6-flash',
         'gemini-3.1-flash-lite',
         'gemini-3.1-pro-preview',
         'gemini-2.5-pro',
-        'gemini-2.5-flash',
-        'gemma-4-31b-it',
-        'gemma-4-26b-it',
         'gemma-3-27b-it',
         'gemma-3-12b-it',
         'gemma-2-27b-it',
-        'gemma-2-9b-it'
+        'gemma-2-9b-it',
+        'text-bison-001'
       ];
     } catch (error) {
       console.error('[GeminiProvider] Fetch models error:', error);
       return [
-        'gemini-3.8-flash',
+        'gemini-3.6-flash',
         'gemini-3.1-flash-lite',
         'gemini-3.1-pro-preview',
         'gemini-2.5-pro',
-        'gemini-2.5-flash',
-        'gemma-4-31b-it',
-        'gemma-4-26b-it',
         'gemma-3-27b-it',
         'gemma-3-12b-it',
         'gemma-2-27b-it',
-        'gemma-2-9b-it'
+        'gemma-2-9b-it',
+        'text-bison-001'
       ];
     }
   }

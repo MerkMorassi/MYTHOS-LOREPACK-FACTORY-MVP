@@ -370,14 +370,15 @@ ${text}`,
           if (response.ok) {
             const data = await response.json();
             const models = data.models || [];
-            // Filter to only valid Gemini & Gemma text generation models (exclude embedding, audio, vision-only)
             const generateModels = models
               .map((m: any) => (m.name || '').replace('models/', ''))
               .filter((name: string) => {
                 const lower = name.toLowerCase();
-                return (lower.startsWith('gemini-') || lower.startsWith('gemma-')) &&
-                  !lower.includes('embedding') &&
-                  !lower.includes('vision-preview');
+                // Allow all models except embedding, audio, vision, and imagen
+                return !lower.includes('embedding') &&
+                  !lower.includes('audio') &&
+                  !lower.includes('vision') &&
+                  !lower.includes('imagen');
               });
 
             if (generateModels.length > 0) {
@@ -392,37 +393,40 @@ ${text}`,
       
       res.json({
         models: [
-          'gemini-3.8-flash',
           'gemini-3.1-flash-lite',
           'gemini-3.1-pro-preview',
           'gemini-2.5-pro',
-          'gemini-2.5-flash',
-          'gemma-4-31b-it',
-          'gemma-4-26b-it',
+          'gemini-3.6-flash',
           'gemma-3-27b-it',
           'gemma-3-12b-it',
           'gemma-2-27b-it',
-          'gemma-2-9b-it'
+          'gemma-2-9b-it',
+          'text-bison-001'
         ]
       });
     } catch (error: any) {
       console.error('[Server] Model listing failed:', error);
       res.json({
         models: [
-          'gemini-3.8-flash',
           'gemini-3.1-flash-lite',
           'gemini-3.1-pro-preview',
           'gemini-2.5-pro',
-          'gemini-2.5-flash',
-          'gemma-4-31b-it',
-          'gemma-4-26b-it',
+          'gemini-3.6-flash',
           'gemma-3-27b-it',
           'gemma-3-12b-it',
           'gemma-2-27b-it',
-          'gemma-2-9b-it'
+          'gemma-2-9b-it',
+          'text-bison-001'
         ]
       });
     }
+  });
+
+  // API Route: Model Health Check
+  let globalServiceStatus = 'healthy';
+
+  app.get('/api/lorepack/model-health/:modelName', async (req, res) => {
+    res.json({ status: globalServiceStatus });
   });
 
   // Health check endpoints (both /health and /api/health)

@@ -415,6 +415,7 @@ export default function App() {
   const [exploreTab, setExploreTab] = useState<'NODES' | 'EDGES'>('NODES');
   const [nodesList, setNodesList] = useState<VectorRecord[]>([]);
   const [edgesList, setEdgesList] = useState<TripletEdge[]>([]);
+  const [lorepackSearchQuery, setLorepackSearchQuery] = useState<string>(''); // Add this state
   const [selectedRecord, setSelectedRecord] = useState<any | null>(null);
 
   // Pagination states
@@ -2183,6 +2184,13 @@ export default function App() {
                 <Database className="h-4 w-4 text-emerald-400" />
                 <h2 className="text-xs font-bold text-white uppercase tracking-wider">IndexedDB Memory Store Explorer</h2>
               </div>
+              <input
+                type="text"
+                placeholder="Search nodes or triplets..."
+                value={lorepackSearchQuery}
+                onChange={(e) => setLorepackSearchQuery(e.target.value)}
+                className="bg-neutral-950 text-neutral-200 border border-neutral-800 px-3 py-1 rounded font-mono text-xs focus:outline-none w-full sm:w-64"
+              />
               <div className="flex items-center space-x-1 border border-neutral-800 p-0.5 rounded bg-neutral-950">
                 <button
                   onClick={() => setExploreTab('NODES')}
@@ -2210,7 +2218,9 @@ export default function App() {
                       </div>
                     ) : (
                       <div className="space-y-2">
-                        {nodesList.slice((nodesPage - 1) * ITEMS_PER_PAGE, nodesPage * ITEMS_PER_PAGE).map((node) => (
+                        {nodesList
+                          .filter(n => n.text.toLowerCase().includes(lorepackSearchQuery.toLowerCase()))
+                          .slice((nodesPage - 1) * ITEMS_PER_PAGE, nodesPage * ITEMS_PER_PAGE).map((node) => (
                           <div
                             key={node.id}
                             onClick={() => setSelectedRecord(node)}
@@ -2220,7 +2230,15 @@ export default function App() {
                               <span className="text-neutral-400 truncate max-w-[120px] font-bold uppercase">&gt; {node.source}</span>
                               <span className="text-neutral-500 font-mono text-[9px]">{new Date(node.timestamp).toLocaleTimeString()}</span>
                             </div>
-                            <p className="text-xs text-neutral-300 line-clamp-2 leading-relaxed font-mono">{node.text}</p>
+                            <p className="text-xs text-neutral-300 line-clamp-2 leading-relaxed font-mono">
+                              {lorepackSearchQuery 
+                                ? node.text.split(new RegExp(`(${lorepackSearchQuery})`, 'gi')).map((part, i) => 
+                                    part.toLowerCase() === lorepackSearchQuery.toLowerCase() ? 
+                                      <span key={i} className="bg-emerald-900 text-emerald-100">{part}</span> : part
+                                  )
+                                : node.text
+                              }
+                            </p>
                           </div>
                         ))}
                       </div>
@@ -2232,7 +2250,9 @@ export default function App() {
                       </div>
                     ) : (
                       <div className="space-y-2">
-                        {edgesList.slice((edgesPage - 1) * ITEMS_PER_PAGE, edgesPage * ITEMS_PER_PAGE).map((edge) => (
+                        {edgesList
+                          .filter(e => e.s.toLowerCase().includes(lorepackSearchQuery.toLowerCase()) || e.o.toLowerCase().includes(lorepackSearchQuery.toLowerCase()))
+                          .slice((edgesPage - 1) * ITEMS_PER_PAGE, edgesPage * ITEMS_PER_PAGE).map((edge) => (
                           <div
                             key={edge.id}
                             onClick={() => setSelectedRecord(edge)}

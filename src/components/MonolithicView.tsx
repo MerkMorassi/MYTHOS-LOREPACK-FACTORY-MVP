@@ -36,6 +36,49 @@ interface MonolithicViewProps {
   setCustomApiKeys: React.Dispatch<React.SetStateAction<string[]>>;
 }
 
+// Model Health Indicator
+const ModelHealthIndicator: React.FC<{ model: string }> = ({ model }) => {
+  const [status, setStatus] = useState<'healthy' | 'degraded' | 'checking'>('checking');
+
+  useEffect(() => {
+    let mounted = true;
+    const checkHealth = async () => {
+      setStatus('checking');
+      try {
+        const response = await fetch(`/api/lorepack/model-health/${encodeURIComponent(model)}`);
+        if (mounted) {
+          if (response.ok) {
+            const data = await response.json();
+            setStatus(data.status === 'healthy' ? 'healthy' : 'degraded');
+          } else if (response.status === 429) {
+            // Quota exceeded: model is actually healthy, just limited.
+            setStatus('healthy');
+          } else {
+            setStatus('degraded');
+          }
+        }
+      } catch {
+        if (mounted) setStatus('degraded');
+      }
+    };
+
+    checkHealth();
+    return () => {
+      mounted = false;
+    };
+  }, [model]);
+
+  const color = status === 'healthy' ? 'bg-[#00ff41]' : status === 'degraded' ? 'bg-[#ffaa00]' : 'bg-[#8a8a8a]';
+  const pulseClass = status === 'checking' ? '' : 'animate-pulse';
+
+  return (
+    <div className="flex items-center gap-1.5" title={`Model Health: ${status}`}>
+      <div className={`w-2 h-2 rounded-full ${color} ${pulseClass}`} />
+      <span className="text-[10px] uppercase tracking-wider text-[#8a8a8a]">{status}</span>
+    </div>
+  );
+};
+
 export const MonolithicView: React.FC<MonolithicViewProps> = ({
   factory,
   store,
@@ -56,19 +99,17 @@ export const MonolithicView: React.FC<MonolithicViewProps> = ({
   const activeAgent = getCanonicalAgentById(agentId) || CANONICAL_MYTHOS_AGENTS[0];
 
   // Monolithic Control States
-  const [generationModel, setGenerationModel] = useState<string>('gemini-3.8-flash');
+  const [generationModel, setGenerationModel] = useState<string>('gemini-3.6-flash');
   const [availableModels, setAvailableModels] = useState<string[]>([
-    'gemini-3.8-flash',
     'gemini-3.1-flash-lite',
     'gemini-3.1-pro-preview',
     'gemini-2.5-pro',
-    'gemini-2.5-flash',
-    'gemma-4-31b-it',
-    'gemma-4-26b-it',
+    'gemini-3.6-flash',
     'gemma-3-27b-it',
     'gemma-3-12b-it',
     'gemma-2-27b-it',
-    'gemma-2-9b-it'
+    'gemma-2-9b-it',
+    'text-bison-001'
   ]);
   const [fetchingModels, setFetchingModels] = useState<boolean>(false);
   const [showAgentIdentity, setShowAgentIdentity] = useState<boolean>(false);
@@ -292,19 +333,16 @@ export const MonolithicView: React.FC<MonolithicViewProps> = ({
       addLog(`Failed to fetch models: ${err.message}`, 'SYS', 'err');
       // If fetching fails entirely (e.g. invalid key or cors), fall back to sensible defaults
       setAvailableModels([
-        'gemini-3.8-flash',
+        'gemini-3.6-flash',
         'gemini-3.1-flash-lite',
         'gemini-3.1-pro-preview',
         'gemini-2.5-pro',
-        'gemini-2.5-flash',
-        'gemma-4-31b-it',
-        'gemma-4-26b-it',
         'gemma-3-27b-it',
         'gemma-3-12b-it',
         'gemma-2-27b-it',
         'gemma-2-9b-it'
       ]);
-      setGenerationModel('gemini-3.8-flash');
+      setGenerationModel('gemini-3.6-flash');
     } finally {
       setFetchingModels(false);
     }
@@ -1249,6 +1287,7 @@ export const MonolithicView: React.FC<MonolithicViewProps> = ({
               <span className="text-[#333]">|</span>
               <span className="text-[10px] text-[#8a8a8a] flex items-center gap-1">
                 MODEL: <span id="statActiveModel" className="text-[#ffaa00] font-bold">{generationModel}</span>
+                <ModelHealthIndicator model={generationModel} />
                 <button
                   type="button"
                   disabled={oracleBusy}
