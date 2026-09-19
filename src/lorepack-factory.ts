@@ -547,7 +547,12 @@ export class LorepackFactory {
     const derivation = contextNodes.length ? `COSINE_TOPK(${topK})` : 'NO_CONTEXT';
     const prompt = `CONTEXT:\n${context}\n\nUSER:\n${userQuery}`;
 
-    const textToGenerate = systemPrompt ? `${systemPrompt}\n\n${prompt}` : prompt;
+    const modelContext = modelName
+      ? `\n[RUNTIME ENGINE CONTEXT]: Active Model is Google Gemini (${modelName}). Active Locus: ${agentId}. You possess context awareness of your active model and can confirm your model if asked.`
+      : '';
+    const textToGenerate = systemPrompt
+      ? `${systemPrompt}${modelContext}\n\n${prompt}`
+      : modelContext ? `${modelContext}\n\n${prompt}` : prompt;
     const responseText = this.model.generateText
       ? await this.model.generateText(textToGenerate, undefined, modelName)
       : '';

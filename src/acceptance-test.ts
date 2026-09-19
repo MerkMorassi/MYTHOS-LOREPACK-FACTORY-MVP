@@ -880,9 +880,33 @@ async function main() {
     console.error(`  ${RED}✘ EXPLICIT TEST 7 (Persistence): FAILED - ${error.message}${RESET}\n`);
   }
 
+  // 8. EXPLICIT TEST 8: Active Model Context Awareness and Conformation
+  try {
+    console.log(`${YELLOW}▶ EXPLICIT TEST 8: Active Model Context Awareness and Conformation${RESET}`);
+    const selectedModel = 'gemini-3.8-flash';
+    const factory = new LorepackFactory(store, provider);
+
+    const chatRes = await factory.chat(
+      'Which generative model is active?',
+      'AGENT_MODEL_TEST',
+      1,
+      'System prompt test',
+      selectedModel
+    );
+
+    assert(chatRes && typeof chatRes.response === 'string', 'Chat response text must be defined');
+    assert(chatRes.response.length > 0, 'Chat response should not be empty');
+
+    scorecard['MODEL_AWARENESS'] = 'PASS';
+    console.log(`  ${GREEN}✔ EXPLICIT TEST 8 (Model context awareness): SUCCESS${RESET}\n`);
+  } catch (error: any) {
+    passedAll = false;
+    console.error(`  ${RED}✘ EXPLICIT TEST 8 (Model context awareness): FAILED - ${error.message}${RESET}\n`);
+  }
+
   // 9. REGRESSION: Ensure the existing MVP Test Matrix remains green
   try {
-    console.log(`${YELLOW}▶ EXPLICIT TEST 8: Existing MVP Regression Testing Suite${RESET}`);
+    console.log(`${YELLOW}▶ EXPLICIT TEST 9: Existing MVP Regression Testing Suite${RESET}`);
     
     // Clear custom keys to fall back safely to our mock fetch handler
     provider.setApiKeys([]);

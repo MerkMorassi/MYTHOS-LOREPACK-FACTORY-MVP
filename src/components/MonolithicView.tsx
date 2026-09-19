@@ -16,6 +16,7 @@ export interface MonolithicLogEntry {
   src: 'SYS' | 'USER' | 'AI' | 'KERNEL' | 'TEST';
   type: 'sys' | 'user' | 'ai' | 'ok' | 'err';
   msg: string;
+  model?: string;
 }
 
 interface MonolithicViewProps {
@@ -201,15 +202,64 @@ export const MonolithicView: React.FC<MonolithicViewProps> = ({
     setSystemPrompt(activeAgent.system_instruction);
   }, [agentId, activeAgent.system_instruction]);
 
-  const addLog = (msg: string, src: MonolithicLogEntry['src'] = 'SYS', type: MonolithicLogEntry['type'] = 'sys') => {
+  const addLog = (
+    msg: string,
+    src: MonolithicLogEntry['src'] = 'SYS',
+    type: MonolithicLogEntry['type'] = 'sys',
+    model?: string
+  ) => {
     const entry: MonolithicLogEntry = {
       id: `${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
       time: new Date().toLocaleTimeString(),
       src,
       type,
       msg,
+      model,
     };
     setLogs((prev) => [...prev, entry]);
+  };
+
+  // Dedicated Model Self-Identification & Telemetry Probe
+  const handleConfirmModel = async () => {
+    if (oracleBusy) return;
+    setOracleBusy(true);
+    addLog(`Probing active generation model locus for verification...`, 'SYS', 'sys');
+
+    const modelContext = `[ENGINE CONTEXT & MODEL AWARENESS]:
+- Active Model Architecture: Google Gemini (${generationModel})
+- Model Identifier: ${generationModel}
+- Active Agent Locus: MYTHOS.LORE.${activeAgent.id} (Port ${activeAgent.port})
+- Agent Identifier: ${activeAgent.id} (${activeAgent.handle})
+- Persona Tone: ${monoTone || activeAgent.meta.tone || 'Canonical MythOS'}
+- Persona Constraints: ${monoConstraints.length > 0 ? monoConstraints.join('; ') : activeAgent.meta.constraints.join('; ')}
+- OPERATIONAL INSTRUCTION: You are context-aware that your generative engine is Google Gemini model "${generationModel}". Explicitly confirm your active model architecture, model name ("${generationModel}"), and agent locus ("MYTHOS.LORE.${activeAgent.id}") in an authoritative, unambiguous diagnostic confirmation statement.`;
+
+    try {
+      if (provider) {
+        const response = await provider.generateText(
+          `System Diagnostic Probe: Confirm active generative model, agent locus, and execution readiness.`,
+          modelContext,
+          generationModel
+        );
+        addLog(response, 'AI', 'ok', generationModel);
+      } else {
+        addLog(
+          `[MODEL LOCUS CONFIRMED]: Agent [${activeAgent.handle}] is executing on Google Gemini model "${generationModel}" (Locus: MYTHOS.LORE.${activeAgent.id}, Port: ${activeAgent.port}). Status: OPERATIONAL.`,
+          'AI',
+          'ok',
+          generationModel
+        );
+      }
+    } catch (err: any) {
+      addLog(
+        `[MODEL LOCUS TELEMETRY]: Active configured model is ${generationModel} (Locus: MYTHOS.LORE.${activeAgent.id}). Status: ${err.message || err}`,
+        'AI',
+        'sys',
+        generationModel
+      );
+    } finally {
+      setOracleBusy(false);
+    }
   };
 
   const handleFetchModels = async () => {
@@ -499,22 +549,37 @@ export const MonolithicView: React.FC<MonolithicViewProps> = ({
         }
       }
 
+      // Enriched context payload injecting active Gemini model identity, locus, and conformity rules
+      const modelContext = `[ENGINE CONTEXT & MODEL AWARENESS]:
+- Active Model Architecture: Google Gemini (${generationModel})
+- Model Identifier: ${generationModel}
+- Active Agent Locus: MYTHOS.LORE.${activeAgent.id} (Port ${activeAgent.port})
+- Agent Identifier: ${activeAgent.id} (${activeAgent.handle})
+- Persona Tone: ${monoTone || activeAgent.meta.tone || 'Canonical MythOS'}
+- Persona Constraints: ${monoConstraints.length > 0 ? monoConstraints.join('; ') : activeAgent.meta.constraints.join('; ')}
+- OPERATIONAL DIRECTIVE: You possess complete real-time context awareness of your active generative engine. You are running on Google Gemini model "${generationModel}". When asked to identify, verify, or confirm which model is running or your underlying architecture, you must explicitly confirm that you are powered by Google Gemini model "${generationModel}" within active locus MYTHOS.LORE.${activeAgent.id}.`;
+
+      const enrichedSystemPrompt = systemPrompt
+        ? `${systemPrompt}\n\n${modelContext}`
+        : modelContext;
+
       if (provider) {
         const prompt = `User Query: ${text}${contextStr}`;
-        const response = await provider.generateText(prompt, systemPrompt, generationModel);
-        addLog(response, 'AI', 'ai');
+        const response = await provider.generateText(prompt, enrichedSystemPrompt, generationModel);
+        addLog(response, 'AI', 'ai', generationModel);
       } else {
         // Local simulation if provider not initialized
         setTimeout(() => {
-          addLog(
-            `[${activeAgent.handle}]: Memory query processed. Active locus is MYTHOS.LORE.${activeAgent.id}. ${
-              contextStr
-                ? 'Synthesized response from local indexed vectors.'
-                : 'No relevant stored context matched. Provide an API key or ingest lore to deepen cognitive synthesis.'
-            }`,
-            'AI',
-            'ai'
-          );
+          const isModelQuery = /model|which model|what model|confirm model|architecture|engine/i.test(text);
+          let reply = `[${activeAgent.handle}]: Memory query processed under locus MYTHOS.LORE.${activeAgent.id}.`;
+          if (isModelQuery) {
+            reply = `[${activeAgent.handle}]: Confirmed. I am executing on Google Gemini model "${generationModel}" under locus MYTHOS.LORE.${activeAgent.id} (Port ${activeAgent.port}).`;
+          } else if (contextStr) {
+            reply += ' Synthesized response from local indexed vectors.';
+          } else {
+            reply += ' No relevant stored context matched. Provide an API key or ingest lore to deepen cognitive synthesis.';
+          }
+          addLog(reply, 'AI', 'ai', generationModel);
           setOracleBusy(false);
         }, 400);
         return;
@@ -768,8 +833,9 @@ export const MonolithicView: React.FC<MonolithicViewProps> = ({
                   onChange={(e) => {
                     setGenerationModel(e.target.value);
                     setIsParametersLocked(false);
+                    addLog(`Active generation model updated to: ${e.target.value}`, 'SYS', 'sys');
                   }}
-                  className="w-full bg-[#1f1f1f] border border-[#3a3a3a] text-[#e6e6e6] px-2.5 py-1.5 text-xs focus:border-[#ff3300] outline-none rounded-none cursor-pointer"
+                  className="w-full bg-[#1f1f1f] border border-[#3a3a3a] text-[#e6e6e6] px-2.5 py-1.5 text-xs focus:border-[#ff3300] outline-none rounded-none cursor-pointer font-mono"
                 >
                   {availableModels.map((model) => (
                     <option key={model} value={model}>
@@ -777,6 +843,19 @@ export const MonolithicView: React.FC<MonolithicViewProps> = ({
                     </option>
                   ))}
                 </select>
+                <div className="flex items-center justify-between text-[10px] text-[#8a8a8a] pt-1">
+                  <span>ACTIVE: <strong className="text-[#00ff41]">{generationModel}</strong></span>
+                  <button
+                    id="confirmModelBtn"
+                    type="button"
+                    disabled={oracleBusy}
+                    onClick={handleConfirmModel}
+                    className="bg-[#1c1c1c] hover:bg-[#252525] border border-[#3a3a3a] hover:border-[#00ff41] text-[#00ff41] px-2 py-0.5 uppercase tracking-wider font-bold text-[9px] cursor-pointer transition-colors"
+                    title="Confirm and verify active generation model"
+                  >
+                    CONFIRM MODEL
+                  </button>
+                </div>
               </div>
             )}
           </div>
@@ -1155,6 +1234,19 @@ export const MonolithicView: React.FC<MonolithicViewProps> = ({
               <span className="text-[10px] text-[#8a8a8a]">
                 PORT: <span className="text-[#00ff41] font-bold">{activeAgent.port}</span>
               </span>
+              <span className="text-[#333]">|</span>
+              <span className="text-[10px] text-[#8a8a8a] flex items-center gap-1">
+                MODEL: <span id="statActiveModel" className="text-[#ffaa00] font-bold">{generationModel}</span>
+                <button
+                  type="button"
+                  disabled={oracleBusy}
+                  onClick={handleConfirmModel}
+                  className="text-[9px] text-[#8a8a8a] hover:text-[#00ff41] underline cursor-pointer ml-0.5 uppercase"
+                  title="Verify active model locus"
+                >
+                  [CONFIRM]
+                </button>
+              </span>
             </div>
             <button
               id="clearLogBtn"
@@ -1188,7 +1280,7 @@ export const MonolithicView: React.FC<MonolithicViewProps> = ({
                     <span className={`font-bold mr-1.5 ${
                       entry.src === 'USER' ? 'text-[#00ff41]' : entry.src === 'AI' ? 'text-[#ffaa00]' : 'text-[#8a8a8a]'
                     }`}>
-                      {entry.src}:
+                      {entry.src}{entry.model ? ` [${entry.model}]` : ''}:
                     </span>
                     <span className={colorClass}>{entry.msg}</span>
                   </div>
