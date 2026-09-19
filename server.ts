@@ -370,12 +370,14 @@ ${text}`,
           if (response.ok) {
             const data = await response.json();
             const models = data.models || [];
-            // Filter to only valid Gemini text generation models (exclude embedding, gemma open weights, audio, vision-only)
+            // Filter to only valid Gemini & Gemma text generation models (exclude embedding, audio, vision-only)
             const generateModels = models
               .map((m: any) => (m.name || '').replace('models/', ''))
               .filter((name: string) => {
                 const lower = name.toLowerCase();
-                return lower.startsWith('gemini-') && !lower.includes('embedding') && !lower.includes('vision-preview');
+                return (lower.startsWith('gemini-') || lower.startsWith('gemma-')) &&
+                  !lower.includes('embedding') &&
+                  !lower.includes('vision-preview');
               });
 
             if (generateModels.length > 0) {
@@ -394,7 +396,13 @@ ${text}`,
           'gemini-3.1-flash-lite',
           'gemini-3.1-pro-preview',
           'gemini-2.5-pro',
-          'gemini-2.5-flash'
+          'gemini-2.5-flash',
+          'gemma-4-31b-it',
+          'gemma-4-26b-it',
+          'gemma-3-27b-it',
+          'gemma-3-12b-it',
+          'gemma-2-27b-it',
+          'gemma-2-9b-it'
         ]
       });
     } catch (error: any) {
@@ -405,7 +413,13 @@ ${text}`,
           'gemini-3.1-flash-lite',
           'gemini-3.1-pro-preview',
           'gemini-2.5-pro',
-          'gemini-2.5-flash'
+          'gemini-2.5-flash',
+          'gemma-4-31b-it',
+          'gemma-4-26b-it',
+          'gemma-3-27b-it',
+          'gemma-3-12b-it',
+          'gemma-2-27b-it',
+          'gemma-2-9b-it'
         ]
       });
     }

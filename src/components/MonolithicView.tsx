@@ -62,7 +62,13 @@ export const MonolithicView: React.FC<MonolithicViewProps> = ({
     'gemini-3.1-flash-lite',
     'gemini-3.1-pro-preview',
     'gemini-2.5-pro',
-    'gemini-2.5-flash'
+    'gemini-2.5-flash',
+    'gemma-4-31b-it',
+    'gemma-4-26b-it',
+    'gemma-3-27b-it',
+    'gemma-3-12b-it',
+    'gemma-2-27b-it',
+    'gemma-2-9b-it'
   ]);
   const [fetchingModels, setFetchingModels] = useState<boolean>(false);
   const [showAgentIdentity, setShowAgentIdentity] = useState<boolean>(false);
@@ -226,13 +232,13 @@ export const MonolithicView: React.FC<MonolithicViewProps> = ({
     addLog(`Probing active generation model locus for verification...`, 'SYS', 'sys');
 
     const modelContext = `[ENGINE CONTEXT & MODEL AWARENESS]:
-- Active Model Architecture: Google Gemini (${generationModel})
+- Active Model Architecture: ${generationModel.startsWith('gemma-') ? 'Google Gemma' : 'Google Gemini'} (${generationModel})
 - Model Identifier: ${generationModel}
 - Active Agent Locus: MYTHOS.LORE.${activeAgent.id} (Port ${activeAgent.port})
 - Agent Identifier: ${activeAgent.id} (${activeAgent.handle})
 - Persona Tone: ${monoTone || activeAgent.meta.tone || 'Canonical MythOS'}
 - Persona Constraints: ${monoConstraints.length > 0 ? monoConstraints.join('; ') : activeAgent.meta.constraints.join('; ')}
-- OPERATIONAL INSTRUCTION: You are context-aware that your generative engine is Google Gemini model "${generationModel}". Explicitly confirm your active model architecture, model name ("${generationModel}"), and agent locus ("MYTHOS.LORE.${activeAgent.id}") in an authoritative, unambiguous diagnostic confirmation statement.`;
+- OPERATIONAL INSTRUCTION: You are context-aware that your generative engine is ${generationModel.startsWith('gemma-') ? 'Google Gemma' : 'Google Gemini'} model "${generationModel}". Explicitly confirm your active model architecture, model name ("${generationModel}"), and agent locus ("MYTHOS.LORE.${activeAgent.id}") in an authoritative, unambiguous diagnostic confirmation statement.`;
 
     try {
       if (provider) {
@@ -244,7 +250,7 @@ export const MonolithicView: React.FC<MonolithicViewProps> = ({
         addLog(response, 'AI', 'ok', generationModel);
       } else {
         addLog(
-          `[MODEL LOCUS CONFIRMED]: Agent [${activeAgent.handle}] is executing on Google Gemini model "${generationModel}" (Locus: MYTHOS.LORE.${activeAgent.id}, Port: ${activeAgent.port}). Status: OPERATIONAL.`,
+          `[MODEL LOCUS CONFIRMED]: Agent [${activeAgent.handle}] is executing on ${generationModel.startsWith('gemma-') ? 'Google Gemma' : 'Google Gemini'} model "${generationModel}" (Locus: MYTHOS.LORE.${activeAgent.id}, Port: ${activeAgent.port}). Status: OPERATIONAL.`,
           'AI',
           'ok',
           generationModel
@@ -290,7 +296,13 @@ export const MonolithicView: React.FC<MonolithicViewProps> = ({
         'gemini-3.1-flash-lite',
         'gemini-3.1-pro-preview',
         'gemini-2.5-pro',
-        'gemini-2.5-flash'
+        'gemini-2.5-flash',
+        'gemma-4-31b-it',
+        'gemma-4-26b-it',
+        'gemma-3-27b-it',
+        'gemma-3-12b-it',
+        'gemma-2-27b-it',
+        'gemma-2-9b-it'
       ]);
       setGenerationModel('gemini-3.8-flash');
     } finally {
@@ -549,15 +561,15 @@ export const MonolithicView: React.FC<MonolithicViewProps> = ({
         }
       }
 
-      // Enriched context payload injecting active Gemini model identity, locus, and conformity rules
+      // Enriched context payload injecting active model identity, locus, and conformity rules
       const modelContext = `[ENGINE CONTEXT & MODEL AWARENESS]:
-- Active Model Architecture: Google Gemini (${generationModel})
+- Active Model Architecture: ${generationModel.startsWith('gemma-') ? 'Google Gemma' : 'Google Gemini'} (${generationModel})
 - Model Identifier: ${generationModel}
 - Active Agent Locus: MYTHOS.LORE.${activeAgent.id} (Port ${activeAgent.port})
 - Agent Identifier: ${activeAgent.id} (${activeAgent.handle})
 - Persona Tone: ${monoTone || activeAgent.meta.tone || 'Canonical MythOS'}
 - Persona Constraints: ${monoConstraints.length > 0 ? monoConstraints.join('; ') : activeAgent.meta.constraints.join('; ')}
-- OPERATIONAL DIRECTIVE: You possess complete real-time context awareness of your active generative engine. You are running on Google Gemini model "${generationModel}". When asked to identify, verify, or confirm which model is running or your underlying architecture, you must explicitly confirm that you are powered by Google Gemini model "${generationModel}" within active locus MYTHOS.LORE.${activeAgent.id}.`;
+- OPERATIONAL DIRECTIVE: You possess complete real-time context awareness of your active generative engine. You are running on ${generationModel.startsWith('gemma-') ? 'Google Gemma' : 'Google Gemini'} model "${generationModel}". When asked to identify, verify, or confirm which model is running or your underlying architecture, you must explicitly confirm that you are powered by ${generationModel.startsWith('gemma-') ? 'Google Gemma' : 'Google Gemini'} model "${generationModel}" within active locus MYTHOS.LORE.${activeAgent.id}.`;
 
       const enrichedSystemPrompt = systemPrompt
         ? `${systemPrompt}\n\n${modelContext}`
@@ -573,7 +585,7 @@ export const MonolithicView: React.FC<MonolithicViewProps> = ({
           const isModelQuery = /model|which model|what model|confirm model|architecture|engine/i.test(text);
           let reply = `[${activeAgent.handle}]: Memory query processed under locus MYTHOS.LORE.${activeAgent.id}.`;
           if (isModelQuery) {
-            reply = `[${activeAgent.handle}]: Confirmed. I am executing on Google Gemini model "${generationModel}" under locus MYTHOS.LORE.${activeAgent.id} (Port ${activeAgent.port}).`;
+            reply = `[${activeAgent.handle}]: Confirmed. I am executing on ${generationModel.startsWith('gemma-') ? 'Google Gemma' : 'Google Gemini'} model "${generationModel}" under locus MYTHOS.LORE.${activeAgent.id} (Port ${activeAgent.port}).`;
           } else if (contextStr) {
             reply += ' Synthesized response from local indexed vectors.';
           } else {

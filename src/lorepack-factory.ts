@@ -548,7 +548,7 @@ export class LorepackFactory {
     const prompt = `CONTEXT:\n${context}\n\nUSER:\n${userQuery}`;
 
     const modelContext = modelName
-      ? `\n[RUNTIME ENGINE CONTEXT]: Active Model is Google Gemini (${modelName}). Active Locus: ${agentId}. You possess context awareness of your active model and can confirm your model if asked.`
+      ? `\n[RUNTIME ENGINE CONTEXT]: Active Model is ${modelName.startsWith('gemma-') ? 'Google Gemma' : 'Google Gemini'} (${modelName}). Active Locus: ${agentId}. You possess context awareness of your active model and can confirm your model if asked.`
       : '';
     const textToGenerate = systemPrompt
       ? `${systemPrompt}${modelContext}\n\n${prompt}`

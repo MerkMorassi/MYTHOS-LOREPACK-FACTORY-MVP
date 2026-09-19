@@ -889,9 +889,9 @@ async function main() {
     const chatRes = await factory.chat(
       'Which generative model is active?',
       'AGENT_MODEL_TEST',
-      1,
       'System prompt test',
-      selectedModel
+      selectedModel,
+      1
     );
 
     assert(chatRes && typeof chatRes.response === 'string', 'Chat response text must be defined');

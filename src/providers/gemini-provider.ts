@@ -503,7 +503,9 @@ If no defensible relationship exists, return [].`;
               .map((m: any) => (m.name || '').replace('models/', ''))
               .filter((name: string) => {
                 const lower = name.toLowerCase();
-                return lower.startsWith('gemini-') && !lower.includes('embedding') && !lower.includes('vision-preview');
+                return (lower.startsWith('gemini-') || lower.startsWith('gemma-')) &&
+                  !lower.includes('embedding') &&
+                  !lower.includes('vision-preview');
               });
 
             if (generateModels.length > 0) {
@@ -533,7 +535,13 @@ If no defensible relationship exists, return [].`;
         'gemini-3.1-flash-lite',
         'gemini-3.1-pro-preview',
         'gemini-2.5-pro',
-        'gemini-2.5-flash'
+        'gemini-2.5-flash',
+        'gemma-4-31b-it',
+        'gemma-4-26b-it',
+        'gemma-3-27b-it',
+        'gemma-3-12b-it',
+        'gemma-2-27b-it',
+        'gemma-2-9b-it'
       ];
     } catch (error) {
       console.error('[GeminiProvider] Fetch models error:', error);
@@ -542,7 +550,13 @@ If no defensible relationship exists, return [].`;
         'gemini-3.1-flash-lite',
         'gemini-3.1-pro-preview',
         'gemini-2.5-pro',
-        'gemini-2.5-flash'
+        'gemini-2.5-flash',
+        'gemma-4-31b-it',
+        'gemma-4-26b-it',
+        'gemma-3-27b-it',
+        'gemma-3-12b-it',
+        'gemma-2-27b-it',
+        'gemma-2-9b-it'
       ];
     }
   }
