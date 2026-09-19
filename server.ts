@@ -29,7 +29,7 @@ function getAI(): GoogleGenAI {
 
 async function retryWithBackoff<T>(
   fn: () => Promise<T>,
-  retries = 3,
+  retries = 2,
   delayMs = 1000,
 ): Promise<T> {
   try {
@@ -45,9 +45,15 @@ async function retryWithBackoff<T>(
       errStr.includes('unavailable') || 
       errStr.includes('high demand') ||
       errStr.includes('resourceexhausted') ||
+      errStr.includes('resource_exhausted') ||
       errStr.includes('overloaded');
 
     if (!isTransient) {
+      throw error;
+    }
+
+    // Daily quota exhaustion cannot be resolved by short delays; fail-soft immediately
+    if (errStr.includes('perday') || errStr.includes('limit: 20') || errStr.includes('daily')) {
       throw error;
     }
 
@@ -56,13 +62,17 @@ async function retryWithBackoff<T>(
     if (retryInMatch && retryInMatch[1]) {
       const parsedSeconds = parseFloat(retryInMatch[1]);
       if (!isNaN(parsedSeconds)) {
-        currentDelay = Math.ceil(parsedSeconds * 1000) + 1500;
+        if (parsedSeconds > 4) {
+          // If wait is longer than 4s, throw to allow fast fallback rather than holding the HTTP request
+          throw error;
+        }
+        currentDelay = Math.ceil(parsedSeconds * 1000) + 500;
       }
     } else if (errStr.includes('429') || errStr.includes('quota') || errStr.includes('resourceexhausted')) {
-      currentDelay = 25000;
+      // Free tier minute limit exceeded; throw to allow fast fallback
+      throw error;
     }
 
-    console.warn(`[Gemini API] Rate-limit/Transient state detected. Pausing execution for ${currentDelay}ms before retry... (Remaining retries: ${retries})`);
     await new Promise((resolve) => setTimeout(resolve, currentDelay));
     return retryWithBackoff(fn, retries - 1, currentDelay * 2);
   }
@@ -195,7 +205,8 @@ async function startServer() {
   const app = express();
   const PORT = 3000;
 
-  app.use(express.json());
+  app.use(express.json({ limit: '10mb' }));
+  app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
   // API Route: Embed Content
   app.post('/api/lorepack/embed', async (req, res) => {
@@ -254,7 +265,7 @@ async function startServer() {
       const ai = getAI();
       let triplets: Array<{ s: string; r: string; o: string }> | null = null;
       
-      for (const modelToTry of ['gemini-3.8-flash', 'gemini-3.1-flash-lite']) {
+      for (const modelToTry of ['gemini-3.1-flash-lite', 'gemini-3.8-flash', 'gemini-2.5-flash']) {
         try {
           const response = await retryWithBackoff(() => 
             ai.models.generateContent({
@@ -282,7 +293,7 @@ ${text}`,
               },
             }),
             1,
-            1000
+            500
           );
 
           const tripletsText = response.text || '[]';
@@ -292,7 +303,8 @@ ${text}`,
             break;
           }
         } catch (mErr: any) {
-          console.warn(`[Server] Triplet extraction with ${modelToTry} unavailable:`, mErr.message || mErr);
+          const cleanMsg = (mErr?.message || String(mErr)).split('\n')[0].slice(0, 120);
+          console.warn(`[Server] Triplet extraction with ${modelToTry} unavailable (${cleanMsg}), attempting next fallback...`);
         }
       }
 

@@ -499,7 +499,7 @@ export const MonolithicView: React.FC<MonolithicViewProps> = ({
     }
   };
 
-  // Export GZIP
+  // Export GZIP (Canonical compressed export)
   const handleExportGzip = async () => {
     if (!factory) {
       addLog('ERR: LorepackFactory not ready', 'SYS', 'err');
@@ -508,26 +508,16 @@ export const MonolithicView: React.FC<MonolithicViewProps> = ({
 
     addLog(`Exporting Lorepack archive for agent ${activeAgent.id}...`, 'SYS', 'sys');
     try {
-      const lines: string[] = [];
-      for await (const batch of factory.yieldExportBatches(activeAgent.id, 500)) {
-        for (const item of batch) {
-          lines.push(JSON.stringify(item));
-        }
-      }
-      if (lines.length === 0) {
-        addLog('No records found to export for active agent.', 'SYS', 'err');
-        return;
-      }
-      const blob = new Blob([lines.join('\n')], { type: 'application/x-jsonlines' });
+      const { blob, count, filename } = await factory.exportToGz(activeAgent.id);
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `lorepack_${activeAgent.id.toLowerCase()}_${new Date().toISOString().replace(/[:.]/g, '-')}.lorepack.gz`;
+      a.download = filename;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
-      addLog(`Lorepack archive downloaded successfully (${Math.round(blob.size / 1024)} KB, ${lines.length} records).`, 'KERNEL', 'ok');
+      addLog(`Lorepack archive downloaded successfully (${Math.round(blob.size / 1024)} KB, ${count} records, gzip compressed).`, 'KERNEL', 'ok');
     } catch (err: any) {
       addLog(`Export failed: ${err.message}`, 'KERNEL', 'err');
     }
@@ -576,27 +566,55 @@ export const MonolithicView: React.FC<MonolithicViewProps> = ({
     addLog(text, 'USER', 'user');
 
     try {
-      // Check if we have vectors to pull context from
+      // Pull context via embedding cosine similarity with token overlap fallback
       let contextStr = '';
       if (store) {
         const vectors = await store.getVectorsByAgent(activeAgent.id);
         if (vectors.length > 0) {
-          // Simple relevance score based on token overlap
-          const queryTokens = text.toLowerCase().split(/\s+/).filter((t) => t.length > 2);
-          const scored = vectors.map((v) => {
-            const content = (v.text || '').toLowerCase();
-            let score = 0;
-            for (const t of queryTokens) {
-              if (content.includes(t)) score++;
+          let topHits: Array<{ text: string; score: number }> = [];
+          if (provider && typeof provider.getEmbeddings === 'function' && factory) {
+            try {
+              const qVec = await provider.getEmbeddings(text);
+              if (Array.isArray(qVec) && qVec.length > 0) {
+                const scored = vectors
+                  .filter((v) => Array.isArray(v.vector) && v.vector.length === qVec.length)
+                  .map((v) => ({
+                    text: v.text,
+                    score: factory.cosine(qVec, v.vector),
+                  }))
+                  .sort((a, b) => b.score - a.score);
+                topHits = scored.slice(0, 3).filter((s) => s.score >= 0.35);
+              }
+            } catch {
+              // Fallback to token matching below
             }
-            return { vector: v, score };
-          });
-          scored.sort((a, b) => b.score - a.score);
-          const topHits = scored.slice(0, 3).filter((s) => s.score > 0);
+          }
+
+          if (topHits.length === 0) {
+            // Token overlap fallback
+            const queryTokens = text.toLowerCase().split(/\s+/).filter((t) => t.length > 2);
+            const scored = vectors.map((v) => {
+              const content = (v.text || '').toLowerCase();
+              let score = 0;
+              for (const t of queryTokens) {
+                if (content.includes(t)) score++;
+              }
+              return { text: v.text, score };
+            });
+            scored.sort((a, b) => b.score - a.score);
+            topHits = scored.slice(0, 3).filter((s) => s.score > 0);
+          }
+
           if (topHits.length > 0) {
-            contextStr = `\n\n[RELEVANT LORE FROM LOCAL MEMORY]:\n` + topHits.map((h) => h.vector.text).join('\n---\n');
+            contextStr = `\n\n[RELEVANT LORE FROM LOCAL MEMORY]:\n` + topHits.map((h) => h.text).join('\n---\n');
           }
         }
+      }
+
+      // Include staged files content
+      if (stagedFiles.length > 0) {
+        contextStr += `\n\n[STAGED FILES (PRE-INGEST)]:
+${stagedFiles.map(f => `FILE: ${f.name}\nCONTENT:\n${f.text}`).join('\n\n')}`;
       }
 
       // Enriched context payload injecting active model identity, locus, and conformity rules
@@ -1170,11 +1188,13 @@ export const MonolithicView: React.FC<MonolithicViewProps> = ({
                   id="testMatrixBtn"
                   type="button"
                   onClick={() => {
-                    if (onRunTestMatrix) {
-                      onRunTestMatrix();
-                      addLog('Triggered MVP Acceptance Test Matrix runner...', 'TEST', 'sys');
-                    } else {
-                      addLog('Core test suite handler dispatched.', 'TEST', 'sys');
+                    if (confirm('Are you sure you want to run the Core Validation Matrix? This may take time.')) {
+                      if (onRunTestMatrix) {
+                        onRunTestMatrix();
+                        addLog('Triggered MVP Acceptance Test Matrix runner...', 'TEST', 'sys');
+                      } else {
+                        addLog('Core test suite handler dispatched.', 'TEST', 'sys');
+                      }
                     }
                   }}
                   className="w-full bg-[#1c1c1c] hover:bg-[#222] border border-[#3a3a3a] hover:border-[#ff3300] text-[#e6e6e6] py-2 px-3 text-xs font-black uppercase tracking-wider transition-colors cursor-pointer rounded-none text-center"

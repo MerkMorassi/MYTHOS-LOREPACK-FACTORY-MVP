@@ -1616,40 +1616,55 @@ ${node.text}
       );
     }
 
-    const fileName =
-      String(
-        fileOrBlob.name || ''
-      ).toLowerCase();
+    const headerBuffer = await fileOrBlob.slice(0, 16).arrayBuffer();
+    const head = new Uint8Array(headerBuffer);
 
-    let stream =
-      fileOrBlob.stream();
+    let decompressionFormat = null;
+    let isPlain = false;
 
-    if (
-      fileName.endsWith('.gz')
-    ) {
-      if (
-        typeof DecompressionStream ===
-        'undefined'
-      ) {
-        throw new Error(
-          'GZIP import is not supported by this browser.'
-        );
+    if (head.length >= 2 && head[0] === 0x1f && head[1] === 0x8b) {
+      decompressionFormat = 'gzip';
+    } else if (head.length >= 2 && head[0] === 0x78 && ((head[0] << 8) | head[1]) % 31 === 0) {
+      decompressionFormat = 'deflate';
+    } else {
+      let isText = true;
+      if (head.length > 0) {
+        let textLen = Math.min(head.length, 16);
+        for (let i = 0; i < textLen; i++) {
+          const byte = head[i];
+          if (byte < 0x09 || (byte > 0x0d && byte < 0x20 && byte !== 0x1b)) {
+            isText = false;
+            break;
+          }
+        }
       }
-
-      stream =
-        stream.pipeThrough(
-          new DecompressionStream(
-            'gzip'
-          )
-        );
+      if (isText) {
+        isPlain = true;
+      } else {
+        decompressionFormat = 'deflate-raw';
+      }
     }
 
-    const reader =
-      stream
-        .pipeThrough(
-          new TextDecoderStream()
-        )
-        .getReader();
+    let rawStream = fileOrBlob.stream();
+    let textStream;
+
+    if (decompressionFormat) {
+      if (typeof DecompressionStream === 'undefined') {
+        throw new Error('Decompression is not supported by this runtime.');
+      }
+      try {
+        const decompressed = rawStream.pipeThrough(new DecompressionStream(decompressionFormat));
+        textStream = decompressed.pipeThrough(new TextDecoderStream());
+      } catch (e) {
+        throw new Error(`Decompression failed (${decompressionFormat}): ${e.message}`);
+      }
+    } else if (isPlain) {
+      textStream = rawStream.pipeThrough(new TextDecoderStream());
+    } else {
+      throw new Error('Explicit unsupported or invalid compression format.');
+    }
+
+    const reader = textStream.getReader();
 
     let buffer = '';
 

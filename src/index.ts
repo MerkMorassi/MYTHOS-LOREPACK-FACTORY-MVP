@@ -1,13 +1,22 @@
-export { LorepackFactory } from './lorepack-factory.ts';
-export { IndexedDbLorepackStore } from './indexeddb-store.ts';
+export { LorepackFactory } from './lorepack-factory.js';
+export { LorepackPacker, type PackageTestResult } from './packer.js';
+export {
+  LorepackReader,
+  InMemoryLorepackStore,
+  isValidVector,
+  looksLikeText,
+  type VerificationResult,
+  type ScoredNode,
+} from './reader.js';
+export { IndexedDbLorepackStore } from './indexeddb-store.js';
 export {
   CANONICAL_MYTHOS_AGENTS,
   DEFAULT_CANONICAL_AGENT,
   getCanonicalAgentById,
   getCanonicalAgentByPort,
   isValidCanonicalAgentId,
-} from './agents.ts';
-export type { AgentLorePolicy, AgentMeta, CanonicalAgent } from './agents.ts';
+} from './agents.js';
+export type { AgentLorePolicy, AgentMeta, CanonicalAgent } from './agents.js';
 export type {
   ImportProgress,
   LorepackModel,
@@ -15,4 +24,4 @@ export type {
   Triplet,
   TripletEdge,
   VectorRecord,
-} from './types.ts';
+} from './types.js';

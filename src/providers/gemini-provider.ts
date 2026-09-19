@@ -2,7 +2,7 @@ import type { LorepackModel, Triplet } from '../types.ts';
 
 const EMBEDDING_MODEL = 'gemini-embedding-2';
 const FALLBACK_EMBEDDING_MODEL = 'gemini-embedding-001';
-const GENERATION_MODEL = 'gemini-3.8-flash';
+const GENERATION_MODEL = 'gemini-3.1-flash-lite';
 
 export function generateDeterministicEmbedding(text: string, dimension = 768): number[] {
   const vec = new Float64Array(dimension);
