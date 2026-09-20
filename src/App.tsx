@@ -18,6 +18,7 @@ import { NavBar, AppSectionTab } from './components/NavBar.tsx';
 import { MonolithicView } from './components/MonolithicView.tsx';
 import { NetworkGraphView } from './components/NetworkGraphView.tsx';
 import { SigilAccessGate, type SigilSession } from './components/SigilAccessGate.tsx';
+import { LorepackAccessDenied } from './components/LorepackAccessDenied.tsx';
 import { 
   Terminal, 
   Database, 
@@ -129,6 +130,13 @@ export default function App() {
   // GateKeeper Sigil Authentication & Session States
   const [authStatus, setAuthStatus] = useState<'checking' | 'authenticated' | 'unauthenticated'>('checking');
   const [activeSession, setActiveSession] = useState<SigilSession | null>(null);
+
+  // Heuristic routing for Lorepack-specific denial branding
+  const [isLorepackRoute, setIsLorepackRoute] = useState<boolean>(() => {
+    const path = window.location.pathname.toLowerCase();
+    return path.includes('/lorepack') || path.includes('/factory') || path.includes('/models');
+  });
+  const [forceSigilGate, setForceSigilGate] = useState<boolean>(false);
 
   // Check active Builder session on initial mount
   useEffect(() => {
@@ -1357,6 +1365,20 @@ export default function App() {
   }
 
   if (authStatus === 'unauthenticated') {
+    // Show specialized Lorepack denial page if user hit a Lorepack-related "route"
+    if (isLorepackRoute && !forceSigilGate) {
+      return (
+        <LorepackAccessDenied
+          onPresentSigil={() => setForceSigilGate(true)}
+          onReturn={() => {
+            // Reset to clean origin
+            window.history.pushState({}, '', '/');
+            setIsLorepackRoute(false);
+          }}
+        />
+      );
+    }
+
     return (
       <SigilAccessGate
         onAuthenticated={(session) => {
