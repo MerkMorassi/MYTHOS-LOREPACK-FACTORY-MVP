@@ -8,7 +8,7 @@
  * 5. Session termination
  */
 
-const BASE_URL = 'http://localhost:3000';
+const BASE_URL = process.env.TEST_URL || 'https://mythos-lorepack-factory-mvp.vercel.app';
 
 async function runLiveTest() {
   console.log('--- LOREPACK FACTORY: LIVE GATEKEEPER E2E TEST ---');

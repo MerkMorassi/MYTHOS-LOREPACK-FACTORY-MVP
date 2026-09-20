@@ -211,9 +211,9 @@ function extractHeuristicTripletsServer(text: string): Array<{ s: string; r: str
   return triplets;
 }
 
-async function startServer() {
+export async function createServer() {
   const app = express();
-  const PORT = 3000;
+  const PORT = Number(process.env.PORT) || 3000;
 
   app.use(cookieParser());
   app.use(express.json({ limit: '10mb' }));
@@ -583,12 +583,19 @@ ${text}`,
     });
   }
 
-  app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Server running on http://0.0.0.0:${PORT}`);
-  });
+  return app;
 }
 
-startServer().catch((err) => {
-  console.error('Failed to start server:', err);
-  process.exit(1);
-});
+// Only start the server automatically if we're NOT on Vercel
+// Vercel will import the app and handle the request via its own runtime
+if (!process.env.VERCEL) {
+  createServer().then((app) => {
+    const PORT = Number(process.env.PORT) || 3000;
+    app.listen(PORT, '0.0.0.0', () => {
+      console.log(`Server running on http://0.0.0.0:${PORT}`);
+    });
+  }).catch((err) => {
+    console.error('Failed to start server:', err);
+    process.exit(1);
+  });
+}
