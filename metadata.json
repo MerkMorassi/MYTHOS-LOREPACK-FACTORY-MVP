@@ -1,6 +1,8 @@
 {
   "name": "Mythos Lorepack Factory",
   "description": "Engineering interface to create, store, retrieve, transport, and restore compiled memory using the local-first Lorepack system.",
-  "requestFramePermissions": [],
+  "requestFramePermissions": [
+    "camera"
+  ],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

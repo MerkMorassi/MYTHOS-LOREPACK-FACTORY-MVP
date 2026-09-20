@@ -17,6 +17,7 @@ import type { TestSuiteState } from './core-test-runner.ts';
 import { NavBar, AppSectionTab } from './components/NavBar.tsx';
 import { MonolithicView } from './components/MonolithicView.tsx';
 import { NetworkGraphView } from './components/NetworkGraphView.tsx';
+import { SigilAccessGate, type SigilSession } from './components/SigilAccessGate.tsx';
 import { 
   Terminal, 
   Database, 
@@ -45,7 +46,10 @@ import {
   Sparkles,
   Bookmark,
   BookmarkPlus,
-  Check
+  Check,
+  Lock,
+  LogOut,
+  ShieldCheck
 } from 'lucide-react';
 
 export interface AgentCustomOverride {
@@ -122,6 +126,47 @@ export const DEFAULT_PERSONA_PRESETS: PersonaPreset[] = [
 ];
 
 export default function App() {
+  // GateKeeper Sigil Authentication & Session States
+  const [authStatus, setAuthStatus] = useState<'checking' | 'authenticated' | 'unauthenticated'>('checking');
+  const [activeSession, setActiveSession] = useState<SigilSession | null>(null);
+
+  // Check active Builder session on initial mount
+  useEffect(() => {
+    const checkSession = async () => {
+      try {
+        const res = await fetch('/api/auth/session', {
+          method: 'GET',
+          headers: { 'Accept': 'application/json' },
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (data.authenticated && data.session) {
+            setActiveSession(data.session);
+            setAuthStatus('authenticated');
+            return;
+          }
+        }
+      } catch (err) {
+        console.warn('Session verification check failed:', err);
+      }
+      setAuthStatus('unauthenticated');
+    };
+    checkSession();
+  }, []);
+
+  const handleLogout = async () => {
+    try {
+      await fetch('/api/auth/logout', {
+        method: 'POST',
+        headers: { 'Accept': 'application/json' },
+      });
+    } catch (err) {
+      console.warn('Logout request failed:', err);
+    }
+    setActiveSession(null);
+    setAuthStatus('unauthenticated');
+  };
+
   // Core Engine References
   const [factory, setFactory] = useState<LorepackFactory | null>(null);
   const [store, setStore] = useState<IndexedDbLorepackStore | null>(null);
@@ -1300,6 +1345,28 @@ export default function App() {
     </section>
   );
 
+  if (authStatus === 'checking') {
+    return (
+      <div className="h-screen w-screen bg-neutral-950 flex flex-col items-center justify-center font-mono text-neutral-400 gap-3">
+        <RefreshCw className="w-8 h-8 text-amber-500 animate-spin" />
+        <span className="text-xs uppercase tracking-widest text-neutral-500">
+          Checking GateKeeper Session...
+        </span>
+      </div>
+    );
+  }
+
+  if (authStatus === 'unauthenticated') {
+    return (
+      <SigilAccessGate
+        onAuthenticated={(session) => {
+          setActiveSession(session);
+          setAuthStatus('authenticated');
+        }}
+      />
+    );
+  }
+
   return (
     <div className="h-screen max-h-screen bg-neutral-950 text-neutral-200 font-mono flex flex-col antialiased overflow-hidden">
       {/* 1. Terminal Top Banner */}
@@ -1319,6 +1386,17 @@ export default function App() {
 
         {/* Global Hardware Status Bars */}
         <div className="flex flex-wrap items-center gap-2">
+          {/* GateKeeper Session Indicator */}
+          {activeSession && (
+            <div className="flex items-center space-x-1.5 bg-neutral-950 px-2.5 py-1 border border-amber-500/30 rounded text-xs">
+              <ShieldCheck className="h-3 w-3 text-amber-400" />
+              <span className="text-[9px] text-neutral-400">SIGIL:</span>
+              <span className="text-[9px] font-bold text-amber-400 font-mono" title={`Session ${activeSession.id}`}>
+                {activeSession.sigilMask}
+              </span>
+            </div>
+          )}
+
           <div className="flex items-center space-x-1.5 bg-neutral-950 px-2.5 py-1 border border-neutral-800 rounded text-xs">
             <Database className="h-3 w-3 text-neutral-500" />
             <span className="text-[9px] text-neutral-400">DATABASE:</span>
@@ -1340,6 +1418,14 @@ export default function App() {
             title="API Settings"
           >
             <Settings className="h-3.5 w-3.5" />
+          </button>
+          <button
+            id="btn-lock-session"
+            onClick={handleLogout}
+            className="flex items-center justify-center bg-neutral-950 hover:bg-neutral-800 border border-neutral-800 hover:border-rose-900/60 p-1.5 rounded text-neutral-400 hover:text-rose-400 transition-colors cursor-pointer"
+            title="Lock Factory / Terminate SIGIL Session"
+          >
+            <LogOut className="h-3.5 w-3.5" />
           </button>
         </div>
       </header>

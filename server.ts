@@ -1,8 +1,18 @@
 import express from 'express';
 import path from 'path';
+import cookieParser from 'cookie-parser';
 import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI, Type } from '@google/genai';
 import dotenv from 'dotenv';
+import { validateGateKeeperSigil, maskToken } from './server/gatekeeper-client.js';
+import {
+  createBuilderSession,
+  getBuilderSession,
+  revokeBuilderSession,
+  requireBuilderAuth,
+  getSessionCookieOptions,
+  extractSessionToken,
+} from './server/session-store.js';
 
 dotenv.config();
 
@@ -205,11 +215,118 @@ async function startServer() {
   const app = express();
   const PORT = 3000;
 
+  app.use(cookieParser());
   app.use(express.json({ limit: '10mb' }));
   app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
+  // ------------------------------------------------------------
+  // AUTHENTICATION & SESSION ENDPOINTS (PUBLIC)
+  // ------------------------------------------------------------
+
+  // Check current session state
+  app.get('/api/auth/session', (req, res) => {
+    const token = extractSessionToken(req);
+    if (!token) {
+      res.json({ authenticated: false });
+      return;
+    }
+
+    const session = getBuilderSession(token);
+    if (!session) {
+      res.json({ authenticated: false });
+      return;
+    }
+
+    res.json({
+      authenticated: true,
+      session: {
+        id: session.id,
+        sigilMask: session.sigilMask,
+        serviceName: session.serviceName,
+        createdAt: session.createdAt,
+        expiresAt: session.expiresAt,
+      },
+    });
+  });
+
+  // Verify GateKeeper SIGIL and establish Builder session
+  app.post('/api/auth/sigil-verify', async (req, res) => {
+    try {
+      const { sigil } = req.body || {};
+      if (!sigil || typeof sigil !== 'string') {
+        res.status(400).json({
+          success: false,
+          error: 'BAD REQUEST',
+          message: 'GateKeeper SIGIL payload is required.',
+        });
+        return;
+      }
+
+      console.log(`[GateKeeper Handshake] Verifying presented SIGIL: ${maskToken(sigil)}...`);
+
+      const result = await validateGateKeeperSigil(sigil);
+
+      if (!result.valid) {
+        console.warn(`[GateKeeper Handshake] SIGIL validation rejected: ${result.reason} (Token: ${maskToken(sigil)})`);
+        res.status(401).json({
+          success: false,
+          error: 'ACCESS DENIED',
+          message: result.reason || 'Invalid, expired, or unentitled SIGIL.',
+        });
+        return;
+      }
+
+      // Establish authenticated Lorepack Builder session
+      const serviceName = result.pass?.serviceName || 'Lorepack Builder Access';
+      const session = createBuilderSession(sigil, serviceName);
+
+      // Set secure HTTP-only session cookie
+      const cookieOpts = getSessionCookieOptions(req);
+      res.cookie('lb_session', session.token, cookieOpts);
+
+      console.log(`[GateKeeper Handshake] Session established: ${session.id} for SIGIL ${session.sigilMask}`);
+
+      res.json({
+        success: true,
+        session: {
+          id: session.id,
+          token: session.token,
+          sigilMask: session.sigilMask,
+          serviceName: session.serviceName,
+          createdAt: session.createdAt,
+          expiresAt: session.expiresAt,
+        },
+      });
+    } catch (err: any) {
+      console.error('[GateKeeper Handshake] Unexpected verification error:', err);
+      res.status(500).json({
+        success: false,
+        error: 'SERVER ERROR',
+        message: 'Internal error during SIGIL verification handshake.',
+      });
+    }
+  });
+
+  // Terminate session and clear cookie
+  app.post('/api/auth/logout', (req, res) => {
+    const token = extractSessionToken(req);
+    if (token) {
+      revokeBuilderSession(token);
+    }
+    const clearOpts = getSessionCookieOptions(req, 0);
+    res.clearCookie('lb_session', clearOpts);
+    res.json({
+      success: true,
+      message: 'Lorepack Builder session terminated.',
+    });
+  });
+
+  // ------------------------------------------------------------
+  // PROTECTED FACTORY API ROUTES (REQUIRE VALID BUILDER SESSION)
+  // ------------------------------------------------------------
+
   // API Route: Embed Content
-  app.post('/api/lorepack/embed', async (req, res) => {
+  app.post('/api/lorepack/embed', requireBuilderAuth, async (req, res) => {
     try {
       const { text } = req.body;
       if (!text || typeof text !== 'string') {
@@ -254,7 +371,7 @@ async function startServer() {
   });
 
   // API Route: Extract Triplet Edges
-  app.post('/api/lorepack/triplets', async (req, res) => {
+  app.post('/api/lorepack/triplets', requireBuilderAuth, async (req, res) => {
     const text = typeof req.body?.text === 'string' ? req.body.text : '';
     if (!text.trim()) {
       res.json({ triplets: [] });
@@ -320,7 +437,7 @@ ${text}`,
   });
 
   // API Route: General Generation
-  app.post('/api/lorepack/generate', async (req, res) => {
+  app.post('/api/lorepack/generate', requireBuilderAuth, async (req, res) => {
     try {
       const { prompt, systemPrompt, model } = req.body;
       if (!prompt || typeof prompt !== 'string') {
@@ -373,7 +490,7 @@ ${text}`,
   });
 
   // API Route: List Models
-  app.get('/api/lorepack/models', async (req, res) => {
+  app.get('/api/lorepack/models', requireBuilderAuth, async (req, res) => {
     try {
       const apiKey = process.env.GEMINI_API_KEY;
       if (apiKey) {
@@ -437,7 +554,7 @@ ${text}`,
   // API Route: Model Health Check
   let globalServiceStatus = 'healthy';
 
-  app.get('/api/lorepack/model-health/:modelName', async (req, res) => {
+  app.get('/api/lorepack/model-health/:modelName', requireBuilderAuth, async (req, res) => {
     res.json({ status: globalServiceStatus });
   });
 
