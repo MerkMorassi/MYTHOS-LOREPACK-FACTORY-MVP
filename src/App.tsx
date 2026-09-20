@@ -19,6 +19,7 @@ import { MonolithicView } from './components/MonolithicView.tsx';
 import { NetworkGraphView } from './components/NetworkGraphView.tsx';
 import { SigilAccessGate, type SigilSession } from './components/SigilAccessGate.tsx';
 import { LorepackAccessDenied } from './components/LorepackAccessDenied.tsx';
+import { BatchIngestionSummary, type IngestionSummaryData } from './components/BatchIngestionSummary.tsx';
 import { 
   Terminal, 
   Database, 
@@ -137,6 +138,9 @@ export default function App() {
     return path.includes('/lorepack') || path.includes('/factory') || path.includes('/models');
   });
   const [forceSigilGate, setForceSigilGate] = useState<boolean>(false);
+  
+  // Batch Ingestion Summary Modal
+  const [ingestionSummary, setIngestionSummary] = useState<IngestionSummaryData | null>(null);
 
   // Check active Builder session on initial mount
   useEffect(() => {
@@ -634,6 +638,7 @@ export default function App() {
   // 3. Handle Text Ingestion Flow
   const handleIngestText = async () => {
     if (!factory) return;
+    setIngestionSummary(null);
     setIngestProgress({ processed: 0, total: 0, active: true });
     log('[INGEST]: Slicing raw data payloads into localized memory blocks...');
 
@@ -678,6 +683,16 @@ export default function App() {
       log(`[INGEST]: Success. Saved ${result.ingested} node vectors to IndexedDB.`);
       await refreshExplorer();
 
+      // Get updated stats for summary
+      const finalStats = await factory.getStats(agentId);
+      setIngestionSummary({
+        nodesAdded: result.ingested,
+        edgesAdded: 0,
+        totalNodes: finalStats.totalNodes,
+        totalEdges: finalStats.totalEdges,
+        sourceName: sourceId || 'Manual Ingest'
+      });
+
       if (autoSaveArchive) {
         await performAutoSaveArchive();
       }
@@ -717,6 +732,7 @@ export default function App() {
   // 5. Handle Graph Construction (Triplet Extraction)
   const handleBuildGraph = async () => {
     if (!factory) return;
+    setIngestionSummary(null);
     setGraphProgress({ current: 0, total: 0, created: 0, active: true });
     log('[GRAPH]: Extracting semantic edge matrices via structured language processing...');
 
@@ -745,6 +761,16 @@ export default function App() {
 
       log(`[GRAPH]: Success. Integrated ${count} custom relationship edges into the agent's semantic graph.`);
       await refreshExplorer();
+
+      // Get updated stats for summary
+      const finalStats = await factory.getStats(agentId);
+      setIngestionSummary({
+        nodesAdded: 0,
+        edgesAdded: count,
+        totalNodes: finalStats.totalNodes,
+        totalEdges: finalStats.totalEdges,
+        sourceName: 'Graph Synthesizer'
+      });
     } catch (err: any) {
       log(`[GRAPH_ERROR]: Triplets extraction terminated: ${err.message || err}`);
     } finally {
@@ -795,6 +821,7 @@ export default function App() {
   const handleImportFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!factory || !e.target.files || e.target.files.length === 0) return;
     const file = e.target.files[0];
+    setIngestionSummary(null);
     setImportProgress({ processed: 0, vectors: 0, edges: 0, active: true });
     setLastImportResults(null);
     log(`[IMPORT]: Reading memory archive: ${file.name}...`);
@@ -811,6 +838,16 @@ export default function App() {
 
       log(`[IMPORT]: Ported memory segment. ${result.importedVectors} vectors, ${result.importedEdges} edges compiled.`);
       await refreshExplorer();
+
+      // Get updated stats for summary
+      const finalStats = await factory.getStats(agentId);
+      setIngestionSummary({
+        nodesAdded: result.importedVectors,
+        edgesAdded: result.importedEdges,
+        totalNodes: finalStats.totalNodes,
+        totalEdges: finalStats.totalEdges,
+        sourceName: file.name
+      });
 
       // Query database to extract and present imported stats and metadata specs directly
       if (store) {
@@ -2904,6 +2941,12 @@ export default function App() {
           </div>
         </div>
       )}
+
+      {/* Batch Ingestion Summary Modal */}
+      <BatchIngestionSummary 
+        data={ingestionSummary} 
+        onClose={() => setIngestionSummary(null)} 
+      />
 
       {/* Settings Modal Overlay */}
       {showSettingsModal && (
