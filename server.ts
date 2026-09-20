@@ -219,6 +219,12 @@ export async function createServer() {
   app.use(express.json({ limit: '10mb' }));
   app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
+  // Diagnostic logging middleware for Vercel 404 investigation
+  app.use((req, res, next) => {
+    console.log(`[API_DIAGNOSTIC] ${new Date().toISOString()} - ${req.method} ${req.path}`);
+    next();
+  });
+
   // ------------------------------------------------------------
   // AUTHENTICATION & SESSION ENDPOINTS (PUBLIC)
   // ------------------------------------------------------------
