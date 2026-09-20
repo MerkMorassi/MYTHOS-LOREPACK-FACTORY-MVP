@@ -1,7 +1,6 @@
 import express from 'express';
 import path from 'path';
 import cookieParser from 'cookie-parser';
-import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI, Type } from '@google/genai';
 import dotenv from 'dotenv';
 import { validateGateKeeperSigil, maskToken } from './server/gatekeeper-client.js';
@@ -576,6 +575,7 @@ ${text}`,
 
   // Vite Integration for Full-Stack App
   if (process.env.NODE_ENV !== 'production') {
+    const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: 'spa',
