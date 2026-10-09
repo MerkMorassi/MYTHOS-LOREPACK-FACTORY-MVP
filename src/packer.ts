@@ -42,6 +42,18 @@ export class LorepackPacker {
   }
 
   /**
+   * Generates a deterministic SHA-256 fingerprint for a given content string.
+   * Utilizes Web Crypto API (SubtleCrypto) for environment-agnostic hashing.
+   */
+  private async computeFingerprint(input: string): Promise<string> {
+    const encoder = new TextEncoder();
+    const data = encoder.encode(input);
+    const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+    const hashArray = Array.from(new Uint8Array(hashBuffer));
+    return hashArray.map((b) => b.toString(16).padStart(2, '0')).join('');
+  }
+
+  /**
    * Pure staging function: assigns deterministic sigil (numMarkId) and dedupes
    * against supplied existing records. Zero internal accumulation state.
    */
@@ -200,9 +212,12 @@ export class LorepackPacker {
 
         // Determine authentic model name
         const modelName = EMBEDDING_MODEL;
+        
+        // Generate deterministic fingerprint-based ID (Content-Addressable)
+        const fingerprint = await this.computeFingerprint(`${options.agentId}:${entry.text.trim().toLowerCase()}`);
 
         records.push({
-          id: crypto.randomUUID(),
+          id: `lp_node_${fingerprint}`,
           agentId: options.agentId,
           text: entry.text,
           vector,
@@ -216,6 +231,7 @@ export class LorepackPacker {
             embeddingModel: modelName,
             embeddingDimension: vector.length,
             embeddingEpoch: modelName,
+            fingerprint,
           },
         });
       }
@@ -256,10 +272,13 @@ export class LorepackPacker {
     if (!isValidVector(vector)) {
       throw new Error('Conversational turn embedding generation failed.');
     }
+    
+    const fingerprint = await this.computeFingerprint(`${agentId}:${text.trim().toLowerCase()}`);
+    
     await this.store.addRecordsAtomic(
       [
         {
-          id: crypto.randomUUID(),
+          id: `lp_chat_${fingerprint}`,
           agentId,
           agent: agentHandle,
           text,
@@ -273,6 +292,7 @@ export class LorepackPacker {
             embeddingModel: EMBEDDING_MODEL,
             embeddingDimension: vector.length,
             embeddingEpoch: EMBEDDING_MODEL,
+            fingerprint,
           },
         },
       ],
@@ -313,16 +333,24 @@ export class LorepackPacker {
         batch.map(async (node) => {
           const triplets = await this.model.extractTripletsFromText(node.text, modelName);
           if (!triplets.length) return 0;
-          const edges: TripletEdge[] = triplets.map((triplet) => ({
-            id: crypto.randomUUID(),
-            type: 'edge',
-            agentId: agentId.toUpperCase(),
-            sourceId: node.id,
-            s: triplet.s,
-            r: triplet.r,
-            o: triplet.o,
-            timestamp: new Date().toISOString(),
+          
+          const edges: TripletEdge[] = await Promise.all(triplets.map(async (triplet) => {
+            const edgeFingerprint = await this.computeFingerprint(
+              `${agentId}:${node.id}:${triplet.s}:${triplet.r}:${triplet.o}`.toLowerCase()
+            );
+            
+            return {
+              id: `lp_edge_${edgeFingerprint}`,
+              type: 'edge',
+              agentId: agentId.toUpperCase(),
+              sourceId: node.id,
+              s: triplet.s,
+              r: triplet.r,
+              o: triplet.o,
+              timestamp: new Date().toISOString(),
+            };
           }));
+          
           await this.store.addRecordsAtomic([], edges);
           return edges.length;
         })
