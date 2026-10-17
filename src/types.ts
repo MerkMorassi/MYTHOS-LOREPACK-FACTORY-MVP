@@ -35,6 +35,7 @@ export interface LorepackModel {
   extractTripletsFromText(text: string, modelName?: string, keys?: string[]): Promise<Triplet[]>;
   generateText?(prompt: string, systemPrompt?: string, modelName?: string, keys?: string[]): Promise<string>;
   fetchModels?(): Promise<string[]>;
+  fetchEmbeddingModels?(): Promise<string[]>;
 }
 
 export interface LorepackStore {
@@ -55,4 +56,13 @@ export interface ImportProgress {
   edges: number;
   rejected?: number;
 }
+
+export interface ExportProgress {
+  serialized: number;
+  total: number;
+  stage: 'serializing' | 'compressing' | 'complete';
+  percent: number;
+  chunkLabel?: string;
+}
+
 

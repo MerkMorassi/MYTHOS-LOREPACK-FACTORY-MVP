@@ -8,12 +8,16 @@ import {
   CheckCircle2,
   LayoutGrid,
   Share2,
+  Sparkles,
+  Files,
 } from 'lucide-react';
 
 export type AppSectionTab =
   | 'monolithic'
   | 'workspace'
   | 'ingest'
+  | 'bulk'
+  | 'mint-chip'
   | 'explorer'
   | 'transport'
   | 'test-matrix'
@@ -25,6 +29,7 @@ interface NavBarProps {
   onSelectTab: (tab: AppSectionTab) => void;
   stats: { totalNodes: number; totalEdges: number };
   activeAgentId: string;
+  pendingBulkCount?: number;
 }
 
 export const NavBar: React.FC<NavBarProps> = ({
@@ -32,6 +37,7 @@ export const NavBar: React.FC<NavBarProps> = ({
   onSelectTab,
   stats,
   activeAgentId,
+  pendingBulkCount,
 }) => {
   const tabs: {
     id: AppSectionTab;
@@ -62,6 +68,21 @@ export const NavBar: React.FC<NavBarProps> = ({
       label: 'Ingestion & Graph',
       shortLabel: 'Ingest',
       icon: <Layers className="w-3.5 h-3.5 text-neutral-400" />,
+    },
+    {
+      id: 'bulk',
+      label: 'Bulk Operation',
+      shortLabel: 'Bulk Ops',
+      icon: <Files className="w-3.5 h-3.5 text-sky-400" />,
+      badge: pendingBulkCount && pendingBulkCount > 0 ? `${pendingBulkCount} queued` : undefined,
+      tag: 'QUEUE',
+    },
+    {
+      id: 'mint-chip',
+      label: 'Mint Chip Gate',
+      shortLabel: 'Mint Chip',
+      icon: <Sparkles className="w-3.5 h-3.5 text-amber-400" />,
+      tag: 'CHIP SPEC',
     },
     {
       id: 'graph-view',

@@ -1,6 +1,7 @@
 import type { LorepackModel, Triplet } from '../types.ts';
+import { embedBatchPinned, PINNED_MODEL, SUPPORTED_EMBEDDING_MODELS } from '../mint-gate.js';
 
-const EMBEDDING_MODEL = 'gemini-embedding-2';
+const EMBEDDING_MODEL = PINNED_MODEL;
 const FALLBACK_EMBEDDING_MODEL = 'gemini-embedding-001';
 const GENERATION_MODEL = 'gemini-3.1-flash-lite';
 
@@ -167,6 +168,10 @@ export class GeminiProvider implements LorepackModel {
     this.keyIndex = 0;
   }
 
+  getKey(): string {
+    return this._getKey();
+  }
+
   private _getKey(): string {
     if (this.apiKeys.length === 0) {
       throw new Error('API Keys Missing.');
@@ -176,134 +181,34 @@ export class GeminiProvider implements LorepackModel {
     return key;
   }
 
-  async getEmbeddings(text: string): Promise<number[] | null | undefined> {
-    try {
-      if (this.apiKeys.length > 0) {
-        // Try each key if rate-limited
-        let lastErr: any = null;
-        for (let attempt = 0; attempt < this.apiKeys.length; attempt++) {
-          const key = this._getKey();
-          for (const modelToTry of [EMBEDDING_MODEL, FALLBACK_EMBEDDING_MODEL]) {
-            try {
-              const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
-                modelToTry
-              )}:embedContent?key=${encodeURIComponent(key)}`;
+  private activeEmbeddingModel: string = PINNED_MODEL;
 
-              const payload = {
-                model: `models/${modelToTry}`,
-                content: {
-                  parts: [{ text: String(text || '') }],
-                },
-              };
-
-              const response = await fetch(url, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload),
-              });
-
-              const json = await response.json();
-              if (response.ok && !json.error && json.embedding?.values) {
-                return json.embedding.values;
-              }
-              lastErr = new Error(json.error?.message || `Embedding failed (${response.status})`);
-            } catch (err) {
-              lastErr = err;
-            }
-          }
-        }
-        if (lastErr && !isQuotaOrRateLimitError(lastErr)) {
-          // If not quota, proceed to server proxy attempt
-        }
-      }
-
-      // Fallback to server proxy
-      try {
-        const response = await fetch('/api/lorepack/embed', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ text }),
-        });
-
-        if (response.ok) {
-          const data = await response.json();
-          if (data.embedding && Array.isArray(data.embedding)) {
-            return data.embedding;
-          }
-        }
-      } catch (proxyErr) {
-        console.warn('[GeminiProvider] Server proxy embedding request failed:', proxyErr);
-      }
-
-      // Quota / Network fallback: Deterministic offline vector
-      console.warn('[GeminiProvider] Quota reached or API unavailable. Using deterministic local fallback vector.');
-      return generateDeterministicEmbedding(text, 768);
-    } catch (error) {
-      if (isQuotaOrRateLimitError(error)) {
-        console.warn('[GeminiProvider] Quota exceeded on embedding. Using local deterministic fallback vector.');
-        return generateDeterministicEmbedding(text, 768);
-      }
-      console.error('[GeminiProvider] Embedding generation error:', error);
-      return generateDeterministicEmbedding(text, 768);
+  setEmbeddingModel(model: string): void {
+    if (model && typeof model === 'string' && model.trim()) {
+      this.activeEmbeddingModel = model.trim();
     }
   }
 
-  async getEmbeddingsBatch(texts: string[]): Promise<number[][]> {
+  getEmbeddingModel(): string {
+    return this.activeEmbeddingModel;
+  }
+
+  async getEmbeddings(text: string, keys?: string[], model?: string): Promise<number[] | null | undefined> {
+    const res = await this.getEmbeddingsBatch([text], keys, model);
+    return res[0] || null;
+  }
+
+  async getEmbeddingsBatch(texts: string[], keys?: string[], model?: string): Promise<number[][]> {
     if (!texts.length) return [];
-    try {
-      if (this.apiKeys.length > 0) {
-        let lastErr: any = null;
-        for (let attempt = 0; attempt < this.apiKeys.length; attempt++) {
-          const key = this._getKey();
-          for (const modelToTry of [EMBEDDING_MODEL, FALLBACK_EMBEDDING_MODEL]) {
-            try {
-              const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
-                modelToTry
-              )}:batchEmbedContents?key=${encodeURIComponent(key)}`;
-
-              const payload = {
-                requests: texts.map((text) => ({
-                  model: `models/${modelToTry}`,
-                  content: {
-                    parts: [{ text: String(text || '') }],
-                  },
-                })),
-              };
-
-              const response = await fetch(url, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload),
-              });
-
-              const json = await response.json();
-              if (response.ok && !json.error && Array.isArray(json.embeddings)) {
-                return json.embeddings.map((e: any) => e?.values || []);
-              }
-              lastErr = new Error(json.error?.message || `Batch embedding failed (${response.status})`);
-            } catch (err) {
-              lastErr = err;
-            }
-          }
-        }
-      }
-
-      // Sequential fallback or server proxy fallback
-      const results: number[][] = [];
-      for (const t of texts) {
-        const res = await this.getEmbeddings(t);
-        if (res) results.push(res);
-        else results.push(generateDeterministicEmbedding(t, 768));
-      }
-      return results;
-    } catch (error) {
-      if (isQuotaOrRateLimitError(error)) {
-        console.warn('[GeminiProvider] Quota reached on batch embeddings. Generating deterministic vectors.');
-        return texts.map((t) => generateDeterministicEmbedding(t, 768));
-      }
-      console.error('[GeminiProvider] Batch embedding error:', error);
-      return texts.map((t) => generateDeterministicEmbedding(t, 768));
-    }
+    const key = this._getKey();
+    const targetModel = model || this.activeEmbeddingModel || PINNED_MODEL;
+    return embedBatchPinned(
+      fetch.bind(globalThis),
+      key,
+      texts,
+      texts.map((_, i) => `batch:t${i + 1}`),
+      targetModel
+    );
   }
 
   async extractTripletsFromText(text: string, modelName = GENERATION_MODEL): Promise<Triplet[]> {
@@ -555,6 +460,55 @@ If no defensible relationship exists, return [].`;
         'gemma-2-9b-it',
         'text-bison-001'
       ];
+    }
+  }
+
+  async fetchEmbeddingModels(): Promise<string[]> {
+    const fallbackList = Array.from(SUPPORTED_EMBEDDING_MODELS);
+    try {
+      if (this.apiKeys.length > 0) {
+        try {
+          const key = this._getKey();
+          const url = `https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(key)}`;
+          const response = await fetch(url);
+          if (response.ok) {
+            const data = await response.json();
+            const models = data.models || [];
+            const embeddingModels = models
+              .map((m: any) => (m.name || '').replace('models/', ''))
+              .filter((name: string) => {
+                const lower = name.toLowerCase();
+                return lower.includes('embedding') || lower.includes('embed');
+              });
+
+            if (embeddingModels.length > 0) {
+              // Ensure default gemini-embedding-2 is first
+              const combined = Array.from(new Set(['gemini-embedding-2', ...embeddingModels, ...fallbackList]));
+              return combined;
+            }
+          }
+        } catch (clientErr) {
+          console.warn('[GeminiProvider] Client-side fetch embedding models failed, attempting server proxy:', clientErr);
+        }
+      }
+
+      // Fallback to server proxy
+      try {
+        const response = await fetch('/api/lorepack/embedding-models');
+        if (response.ok) {
+          const data = await response.json();
+          if (Array.isArray(data.models) && data.models.length > 0) {
+            return Array.from(new Set(['gemini-embedding-2', ...data.models, ...fallbackList]));
+          }
+        }
+      } catch (proxyErr) {
+        console.warn('[GeminiProvider] Server proxy embedding models fetch error:', proxyErr);
+      }
+
+      return fallbackList;
+    } catch (error) {
+      console.error('[GeminiProvider] Fetch embedding models error:', error);
+      return fallbackList;
     }
   }
 }

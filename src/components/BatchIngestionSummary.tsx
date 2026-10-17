@@ -9,6 +9,7 @@ export interface IngestionSummaryData {
   totalEdges: number;
   sourceName?: string;
   durationMs?: number;
+  failed?: Array<{ id?: string; text?: string; reason: string }>;
 }
 
 interface BatchIngestionSummaryProps {
@@ -84,6 +85,20 @@ export const BatchIngestionSummary: React.FC<BatchIngestionSummaryProps> = ({ da
 
           {/* Details / Footer */}
           <div className="px-6 pb-6 space-y-4">
+            {data.failed && data.failed.length > 0 && (
+              <div className="bg-rose-950/40 border border-rose-800/50 rounded-lg p-3">
+                <div className="text-[10px] text-rose-400 font-bold uppercase tracking-wider mb-1.5">
+                  Ingest Failures ({data.failed.length}) — Export Blocked
+                </div>
+                <div className="max-h-32 overflow-y-auto space-y-1 font-mono text-[10px]">
+                  {data.failed.map((f, idx) => (
+                    <div key={idx} className="text-rose-300">
+                      <span className="font-semibold text-rose-200">{f.id || f.text || `Item #${idx + 1}`}:</span> {f.reason}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
             <div className="bg-neutral-950/50 border border-neutral-800/30 rounded-lg p-3 flex items-start gap-3">
               <Zap className="w-4 h-4 text-amber-500 mt-0.5" />
               <div className="flex-1">

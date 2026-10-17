@@ -20,6 +20,8 @@ import { NetworkGraphView } from './components/NetworkGraphView.tsx';
 import { SigilAccessGate, type SigilSession } from './components/SigilAccessGate.tsx';
 import { LorepackAccessDenied } from './components/LorepackAccessDenied.tsx';
 import { BatchIngestionSummary, type IngestionSummaryData } from './components/BatchIngestionSummary.tsx';
+import { MintChip } from './components/MintChip.tsx';
+import { BulkOperationView, type BulkDocument } from './components/BulkOperationView.tsx';
 import { 
   Terminal, 
   Database, 
@@ -51,10 +53,16 @@ import {
   Check,
   Lock,
   LogOut,
-  ShieldCheck
+  ShieldCheck,
+  Share2,
+  Files
 } from 'lucide-react';
 
 export interface AgentCustomOverride {
+  name?: string;
+  handle?: string;
+  role?: string;
+  customWorkspaceName?: string;
   tone?: string;
   constraints?: string[];
   description?: string;
@@ -141,6 +149,7 @@ export default function App() {
   
   // Batch Ingestion Summary Modal
   const [ingestionSummary, setIngestionSummary] = useState<IngestionSummaryData | null>(null);
+  const [hasUnresolvedFailures, setHasUnresolvedFailures] = useState<boolean>(false);
 
   // Check active Builder session on initial mount
   useEffect(() => {
@@ -242,6 +251,9 @@ export default function App() {
   });
 
   const [isEditingDossier, setIsEditingDossier] = useState<boolean>(false);
+  const [editName, setEditName] = useState<string>('');
+  const [editWorkspaceName, setEditWorkspaceName] = useState<string>('');
+  const [editRole, setEditRole] = useState<string>('');
   const [editTone, setEditTone] = useState<string>('');
   const [editConstraints, setEditConstraints] = useState<string[]>([]);
   const [newConstraintInput, setNewConstraintInput] = useState<string>('');
@@ -321,6 +333,10 @@ export default function App() {
     if (!override) return base;
     return {
       ...base,
+      name: override.name !== undefined ? override.name : base.name,
+      handle: override.handle !== undefined ? override.handle : base.handle,
+      role: override.role !== undefined ? override.role : base.role,
+      customWorkspaceName: override.customWorkspaceName || base.id,
       meta: {
         ...base.meta,
         tone: override.tone !== undefined ? override.tone : base.meta.tone,
@@ -332,6 +348,9 @@ export default function App() {
 
   const startEditingDossier = (targetId: string) => {
     const agent = getEffectiveAgent(targetId);
+    setEditName(agent.name || '');
+    setEditWorkspaceName((agent as any).customWorkspaceName || agent.id || '');
+    setEditRole(agent.role || '');
     setEditTone(agent.meta.tone);
     setEditConstraints([...agent.meta.constraints]);
     setNewConstraintInput('');
@@ -340,6 +359,9 @@ export default function App() {
 
   const handleSaveDossier = (targetId: string) => {
     const base = getCanonicalAgentById(targetId) || DEFAULT_CANONICAL_AGENT;
+    const cleanedName = editName.trim();
+    const cleanedWorkspace = editWorkspaceName.trim().toUpperCase();
+    const cleanedRole = editRole.trim();
     const cleanedTone = editTone.trim();
     const cleanedConstraints = editConstraints.map((c) => c.trim()).filter(Boolean);
 
@@ -347,6 +369,10 @@ export default function App() {
       const updated = {
         ...prev,
         [base.id]: {
+          name: cleanedName || base.name,
+          handle: cleanedName ? cleanedName.split(/\s+/)[0] : base.handle,
+          role: cleanedRole || base.role,
+          customWorkspaceName: cleanedWorkspace || base.id,
           tone: cleanedTone || base.meta.tone,
           constraints: cleanedConstraints,
         },
@@ -359,8 +385,12 @@ export default function App() {
       return updated;
     });
 
+    if (cleanedName) {
+      setAgentHandle(cleanedName.split(/\s+/)[0]);
+    }
+
     setIsEditingDossier(false);
-    log(`[AGENT_DOSSIER]: Updated persona tone and constraints for ${base.handle} (${base.id}).`);
+    log(`[AGENT_DOSSIER]: Updated dossier name/workspace/tone for ${cleanedName || base.handle} (${base.id}).`);
   };
 
   const handleResetDossier = (targetId: string) => {
@@ -466,14 +496,62 @@ export default function App() {
     active: boolean;
   }>({ processed: 0, vectors: 0, edges: 0, active: false });
   const [exporting, setExporting] = useState<boolean>(false);
+  const [exportProgress, setExportProgress] = useState<{
+    active: boolean;
+    serialized: number;
+    total: number;
+    percent: number;
+    stage: 'initializing' | 'serializing' | 'compressing' | 'complete';
+    chunkLabel?: string;
+    filename?: string;
+  }>({
+    active: false,
+    serialized: 0,
+    total: 0,
+    percent: 0,
+    stage: 'initializing',
+  });
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Database Explorer States
   const [exploreTab, setExploreTab] = useState<'NODES' | 'EDGES'>('NODES');
   const [nodesList, setNodesList] = useState<VectorRecord[]>([]);
   const [edgesList, setEdgesList] = useState<TripletEdge[]>([]);
-  const [lorepackSearchQuery, setLorepackSearchQuery] = useState<string>(''); // Add this state
+  const [lorepackSearchQuery, setLorepackSearchQuery] = useState<string>('');
   const [selectedRecord, setSelectedRecord] = useState<any | null>(null);
+  const [showOnlyLinkedEdges, setShowOnlyLinkedEdges] = useState<boolean>(false);
+
+  // Bulk Operation States (with automatic localStorage persistence for in-progress operations)
+  const [bulkQueue, setBulkQueue] = useState<BulkDocument[]>(() => {
+    try {
+      const saved = localStorage.getItem('mythos_bulk_queue');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          // Reset any interrupted reading/ingesting states back to 'pending' so in-progress operations can resume
+          return parsed.map((doc: any) => ({
+            ...doc,
+            status: (doc.status === 'reading' || doc.status === 'ingesting') ? 'pending' : doc.status,
+            progress: (doc.status === 'reading' || doc.status === 'ingesting') ? { processed: 0, total: doc.progress?.total || 0 } : doc.progress,
+          }));
+        }
+      }
+    } catch (err) {
+      console.warn('Failed to restore bulk queue from localStorage:', err);
+    }
+    return [];
+  });
+  const [isBulkProcessing, setIsBulkProcessing] = useState<boolean>(false);
+
+  // Auto-save bulk document queue to localStorage so operations resume after browser refresh
+  useEffect(() => {
+    try {
+      const serializableQueue = bulkQueue.map(({ file, ...rest }) => rest);
+      localStorage.setItem('mythos_bulk_queue', JSON.stringify(serializableQueue));
+    } catch (err) {
+      console.warn('Failed to auto-save bulk queue to localStorage:', err);
+    }
+  }, [bulkQueue]);
 
   // Pagination states
   const [nodesPage, setNodesPage] = useState<number>(1);
@@ -685,19 +763,25 @@ export default function App() {
 
       // Get updated stats for summary
       const finalStats = await factory.getStats(agentId);
+      const failedList = result.failed || [];
+      if (failedList.length > 0) {
+        setHasUnresolvedFailures(true);
+      }
       setIngestionSummary({
         nodesAdded: result.ingested,
         edgesAdded: 0,
         totalNodes: finalStats.totalNodes,
         totalEdges: finalStats.totalEdges,
-        sourceName: sourceId || 'Manual Ingest'
+        sourceName: sourceId || 'Manual Ingest',
+        failed: failedList,
       });
 
-      if (autoSaveArchive) {
+      if (autoSaveArchive && failedList.length === 0) {
         await performAutoSaveArchive();
       }
     } catch (err: any) {
       log(`[INGEST_ERROR]: Processing halted: ${err.message || err}`);
+      setHasUnresolvedFailures(true);
       setLastRunResults((prev) => ({
         sourceFilename: sourceId || 'manual-terminal-input',
         chunksCount: 0,
@@ -706,6 +790,14 @@ export default function App() {
         edgesCount: 0,
         error: err.message || String(err),
       }));
+      setIngestionSummary({
+        nodesAdded: 0,
+        edgesAdded: 0,
+        totalNodes: stats.totalNodes,
+        totalEdges: stats.totalEdges,
+        sourceName: sourceId || 'Manual Ingest',
+        failed: [{ text: sourceId || 'Manual Ingest', reason: err.message || String(err) }],
+      });
     } finally {
       setIngestProgress((prev) => ({ ...prev, active: false }));
     }
@@ -781,37 +873,63 @@ export default function App() {
   // 6. Handle Export Sequence
   const handleExportLorepack = async () => {
     if (!factory) return;
+    if (hasUnresolvedFailures) {
+      log('[EXPORT_BLOCKED]: Ingest failure is unresolved. Cannot export until failures are cleared or resolved.');
+      return;
+    }
+    const estimatedTotal = (stats.totalNodes || 0) + (stats.totalEdges || 0) + 1;
     setExporting(true);
-    log('[EXPORT]: Compiling local database records to JSONL stream format...');
+    setExportProgress({
+      active: true,
+      serialized: 0,
+      total: estimatedTotal,
+      percent: 0,
+      stage: 'initializing',
+      chunkLabel: 'Initializing memory gate and verifying single-space contract...',
+    });
+    log('[EXPORT]: Gating and compiling local database records to Lorepack archive...');
     try {
-      let exportLines: string[] = [];
-      const batchGenerator = factory.yieldExportBatches(agentId, 500);
-
-      for await (const batch of batchGenerator) {
-        for (const item of batch) {
-          exportLines.push(JSON.stringify(item));
-        }
-      }
-
-      if (exportLines.length === 0) {
-        log('[EXPORT_ERROR]: Memory layout is empty. Nothing to extract.');
-        setExporting(false);
-        return;
-      }
-
-      const fileBlob = new Blob([exportLines.join('\n')], { type: 'application/x-jsonlines' });
-      const url = URL.createObjectURL(fileBlob);
+      const exportResult = await factory.exportLorepack(agentId, {
+        gzip: true,
+        onProgress: (p) => {
+          setExportProgress({
+            active: true,
+            serialized: p.serialized,
+            total: p.total,
+            percent: p.percent,
+            stage: p.stage,
+            chunkLabel: p.chunkLabel,
+          });
+        },
+      });
+      const url = URL.createObjectURL(exportResult.blob);
       const link = document.createElement('a');
       link.href = url;
-      link.download = `${agentId.toLowerCase()}_lorepack_${Date.now()}.jsonl`;
+      link.download = exportResult.filename;
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
       URL.revokeObjectURL(url);
 
-      log(`[EXPORT]: Success. Extracted ${exportLines.length} blocks to external Lorepack.`);
+      setExportProgress({
+        active: true,
+        serialized: exportResult.count,
+        total: exportResult.count,
+        percent: 100,
+        stage: 'complete',
+        filename: exportResult.filename,
+        chunkLabel: `GZIP Archive Compiled (${(exportResult.blob.size / 1024).toFixed(1)} KB)`,
+      });
+
+      log(`[EXPORT]: Success. Extracted and gated ${exportResult.count} blocks into ${exportResult.filename}.`);
+
+      // Auto-hide progress indicator after 5 seconds of completion
+      setTimeout(() => {
+        setExportProgress((prev) => ({ ...prev, active: false }));
+      }, 5000);
     } catch (err: any) {
       log(`[EXPORT_ERROR]: Stream compilation failed: ${err.message || err}`);
+      setExportProgress((prev) => ({ ...prev, active: false }));
     } finally {
       setExporting(false);
     }
@@ -1183,6 +1301,58 @@ export default function App() {
     </section>
   );
 
+  const exportProgressBar = exportProgress.active && (
+    <div className="bg-neutral-950 border border-emerald-500/50 p-3 rounded space-y-2 shadow-lg shadow-emerald-950/30 font-mono animate-fadeIn">
+      <div className="flex items-center justify-between text-xs">
+        <div className="flex items-center gap-2 min-w-0">
+          {exportProgress.stage === 'compressing' ? (
+            <RefreshCw className="w-3.5 h-3.5 text-blue-400 animate-spin shrink-0" />
+          ) : exportProgress.stage === 'complete' ? (
+            <CheckCircle className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+          ) : (
+            <Layers className="w-3.5 h-3.5 text-emerald-400 animate-pulse shrink-0" />
+          )}
+          <span className="font-bold uppercase tracking-wider text-white text-[11px] truncate">
+            {exportProgress.stage === 'compressing'
+              ? 'GZIP STREAM COMPRESSION'
+              : exportProgress.stage === 'complete'
+              ? 'EXPORT COMPLETE & GATED'
+              : exportProgress.stage === 'serializing'
+              ? 'SERIALIZING LOREPACK CHUNKS'
+              : 'INITIALIZING EXPORT GATE'}
+          </span>
+        </div>
+        <span className="text-[11px] font-bold text-emerald-400 bg-emerald-950/80 px-1.5 py-0.5 rounded border border-emerald-800/80 shrink-0">
+          {exportProgress.percent}%
+        </span>
+      </div>
+
+      {/* Progress Track */}
+      <div className="w-full bg-neutral-900 h-2.5 rounded-full overflow-hidden border border-neutral-800 p-0.5">
+        <div
+          className={`h-full rounded-full transition-all duration-150 ease-out ${
+            exportProgress.stage === 'compressing'
+              ? 'bg-gradient-to-r from-blue-500 to-cyan-400 animate-pulse'
+              : exportProgress.stage === 'complete'
+              ? 'bg-emerald-400'
+              : 'bg-gradient-to-r from-emerald-600 via-emerald-500 to-teal-400'
+          }`}
+          style={{ width: `${Math.max(4, exportProgress.percent)}%` }}
+        />
+      </div>
+
+      {/* Subtitle / Chunk Metrics */}
+      <div className="flex items-center justify-between text-[10px] text-neutral-400 gap-2">
+        <span className="truncate max-w-[210px]" title={exportProgress.chunkLabel}>
+          {exportProgress.chunkLabel ? `> ${exportProgress.chunkLabel}` : '> Processing stream...'}
+        </span>
+        <span className="shrink-0 font-bold text-neutral-300">
+          {exportProgress.serialized} / {exportProgress.total} chunks
+        </span>
+      </div>
+    </div>
+  );
+
   const transportModule = (
     <section className="bg-neutral-900 border border-neutral-800 rounded flex flex-col">
       <div className="border-b border-neutral-800 px-4 py-3 flex items-center justify-between bg-neutral-900/60">
@@ -1198,13 +1368,15 @@ export default function App() {
           <button
             id="exportBtn"
             onClick={handleExportLorepack}
-            disabled={exporting || stats.totalNodes === 0}
+            disabled={exporting || stats.totalNodes === 0 || hasUnresolvedFailures}
             className="w-full bg-neutral-800 hover:bg-neutral-700 text-white font-bold px-4 py-2.5 rounded text-xs uppercase tracking-wider flex items-center justify-center space-x-2 transition-colors border border-neutral-700 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
           >
             <Download className="h-3.5 w-3.5 text-emerald-400" />
-            <span>{exporting ? 'Packaging Archive...' : 'Compile & Export Lorepack'}</span>
+            <span>{exporting ? 'Packaging Archive...' : hasUnresolvedFailures ? 'Export Blocked (Ingest Failures Unresolved)' : 'Compile & Export Lorepack'}</span>
           </button>
         </div>
+
+        {exportProgressBar}
 
         <div className="border-t border-neutral-800 pt-3">
           <span className="block text-[10px] text-neutral-400 font-bold uppercase tracking-wider mb-2">
@@ -1495,6 +1667,7 @@ export default function App() {
         onSelectTab={setActiveNavTab}
         stats={stats}
         activeAgentId={agentId}
+        pendingBulkCount={bulkQueue.filter((d) => d.status === 'pending').length}
       />
 
       {/* Main Content Area */}
@@ -1537,6 +1710,45 @@ export default function App() {
             activeAgentId={agentId}
             store={store}
             factory={factory}
+          />
+        </main>
+      ) : activeNavTab === 'mint-chip' ? (
+        <main className="flex-1 min-h-0 overflow-y-auto p-4 sm:p-6 max-w-7xl mx-auto w-full">
+          <MintChip
+            factory={factory}
+            store={store}
+            provider={provider}
+            agentId={agentId}
+            setAgentId={(newId) => {
+              const selected = getCanonicalAgentById(newId);
+              const nextId = selected ? selected.id : newId;
+              const nextHandle = selected ? selected.handle : newId.replace(/^agent-/, '');
+              setAgentId(nextId);
+              setAgentHandle(nextHandle);
+              setSelectedRecord(null);
+              setLastRunResults(null);
+              setLastImportResults(null);
+              refreshExplorer();
+            }}
+            agentHandle={agentHandle}
+            customApiKeys={customApiKeys}
+            onMintComplete={refreshExplorer}
+            log={log}
+          />
+        </main>
+      ) : activeNavTab === 'bulk' ? (
+        <main className="flex-1 min-h-0 overflow-y-auto p-4 sm:p-6 max-w-7xl mx-auto w-full">
+          <BulkOperationView
+            factory={factory}
+            store={store}
+            agentId={agentId}
+            chunkSize={chunkSize}
+            queue={bulkQueue}
+            setQueue={setBulkQueue}
+            isProcessing={isBulkProcessing}
+            setIsProcessing={setIsBulkProcessing}
+            onIngestComplete={refreshExplorer}
+            log={log}
           />
         </main>
       ) : (
@@ -1674,6 +1886,51 @@ export default function App() {
                         </span>
                       </div>
                       <span className="text-[10px] text-neutral-500">Changes apply immediately to this workspace</span>
+                    </div>
+
+                    {/* Agent Name, Workspace Locus & Role Customization */}
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 bg-neutral-900/90 border border-neutral-800 rounded p-3">
+                      <div className="flex flex-col gap-1">
+                        <label htmlFor="editAgentName" className="text-[10px] uppercase tracking-wider text-neutral-400 font-bold">
+                          Agent Name / Handle:
+                        </label>
+                        <input
+                          id="editAgentName"
+                          type="text"
+                          value={editName}
+                          onChange={(e) => setEditName(e.target.value)}
+                          placeholder="e.g. Maya, Archivax..."
+                          className="w-full bg-neutral-950 border border-neutral-700 text-neutral-100 px-2.5 py-1.5 text-xs rounded font-mono focus:border-emerald-500 outline-none"
+                        />
+                      </div>
+
+                      <div className="flex flex-col gap-1">
+                        <label htmlFor="editWorkspaceName" className="text-[10px] uppercase tracking-wider text-neutral-400 font-bold">
+                          Agent Workspace Locus:
+                        </label>
+                        <input
+                          id="editWorkspaceName"
+                          type="text"
+                          value={editWorkspaceName}
+                          onChange={(e) => setEditWorkspaceName(e.target.value.toUpperCase())}
+                          placeholder="e.g. MAYA, ARCHIVAX..."
+                          className="w-full bg-neutral-950 border border-neutral-700 text-neutral-100 px-2.5 py-1.5 text-xs rounded font-mono focus:border-emerald-500 outline-none uppercase"
+                        />
+                      </div>
+
+                      <div className="flex flex-col gap-1">
+                        <label htmlFor="editAgentRole" className="text-[10px] uppercase tracking-wider text-neutral-400 font-bold">
+                          Agent Title / Role:
+                        </label>
+                        <input
+                          id="editAgentRole"
+                          type="text"
+                          value={editRole}
+                          onChange={(e) => setEditRole(e.target.value)}
+                          placeholder="e.g. Agent of Illusion..."
+                          className="w-full bg-neutral-950 border border-neutral-700 text-neutral-100 px-2.5 py-1.5 text-xs rounded font-mono focus:border-emerald-500 outline-none"
+                        />
+                      </div>
                     </div>
 
                     {/* Persona Presets Section */}
@@ -2078,7 +2335,25 @@ export default function App() {
                 <Layers className="h-4 w-4 text-emerald-400" />
                 <h2 className="text-xs font-bold text-white uppercase tracking-wider">Memory Chunking & Vector Ingestion</h2>
               </div>
-              <span className="text-[10px] text-neutral-500">STG_INBOUND</span>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setActiveNavTab('bulk')}
+                  className="flex items-center gap-1.5 px-2.5 py-1 bg-sky-950/60 hover:bg-sky-900/70 text-sky-300 border border-sky-800/80 rounded text-[10px] font-mono uppercase tracking-wider font-bold transition-colors cursor-pointer"
+                >
+                  <Files className="w-3 h-3 text-sky-400" />
+                  <span className="hidden sm:inline">Bulk Operation</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setActiveNavTab('mint-chip')}
+                  className="flex items-center gap-1.5 px-2.5 py-1 bg-amber-950/60 hover:bg-amber-900/70 text-amber-300 border border-amber-800/80 rounded text-[10px] font-mono uppercase tracking-wider font-bold transition-colors cursor-pointer"
+                >
+                  <Sparkles className="w-3 h-3 text-amber-400" />
+                  <span className="hidden sm:inline">Mint Chip Gate</span>
+                </button>
+                <span className="text-[10px] text-neutral-500">STG_INBOUND</span>
+              </div>
             </div>
 
             <div className="p-4 flex flex-col gap-4">
@@ -2322,12 +2597,57 @@ export default function App() {
             )}
 
             {/* Module D: Lorepack Database Explorer */}
-            {(activeNavTab === 'all' || activeNavTab === 'explorer') && (
+            {(activeNavTab === 'all' || activeNavTab === 'explorer') && (() => {
+              // Automatically resolve all related triplet edges when a vector node is selected
+              const selectedNodeId = selectedRecord && selectedRecord.text && !selectedRecord.s ? selectedRecord.id : null;
+              const relatedEdges = selectedNodeId
+                ? edgesList.filter((e) => e.sourceId === selectedNodeId || (selectedRecord.text && e.s && e.o && selectedRecord.text.toLowerCase().includes(e.s.toLowerCase()) && selectedRecord.text.toLowerCase().includes(e.o.toLowerCase())))
+                : [];
+              const relatedEdgeIds = new Set(relatedEdges.map((e) => e.id));
+
+              // If an edge is selected, resolve its originating node
+              const selectedEdgeSourceId = selectedRecord && selectedRecord.s ? selectedRecord.sourceId : null;
+
+              // Filter & prioritize edges
+              const filteredEdges = edgesList.filter((e) => {
+                const matchesSearch = !lorepackSearchQuery || 
+                  e.s.toLowerCase().includes(lorepackSearchQuery.toLowerCase()) || 
+                  e.o.toLowerCase().includes(lorepackSearchQuery.toLowerCase()) ||
+                  e.r.toLowerCase().includes(lorepackSearchQuery.toLowerCase());
+                const matchesLinked = !showOnlyLinkedEdges || relatedEdgeIds.has(e.id);
+                return matchesSearch && matchesLinked;
+              });
+
+              // If a node is selected and we're showing all edges, sort related edges to the top
+              const displayedEdges = (selectedNodeId && !showOnlyLinkedEdges)
+                ? [...filteredEdges].sort((a, b) => {
+                    const aRel = relatedEdgeIds.has(a.id) ? 1 : 0;
+                    const bRel = relatedEdgeIds.has(b.id) ? 1 : 0;
+                    return bRel - aRel;
+                  })
+                : filteredEdges;
+
+              return (
               <section className="bg-neutral-900 border border-neutral-800 rounded flex flex-col min-h-[350px]">
             <div className="border-b border-neutral-800 px-4 py-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 bg-neutral-900/60">
               <div className="flex items-center space-x-2">
                 <Database className="h-4 w-4 text-emerald-400" />
                 <h2 className="text-xs font-bold text-white uppercase tracking-wider">IndexedDB Memory Store Explorer</h2>
+                {selectedNodeId && relatedEdges.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setExploreTab('EDGES');
+                      setShowOnlyLinkedEdges(true);
+                      setEdgesPage(1);
+                    }}
+                    className="hidden sm:inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded text-[10px] font-mono font-bold bg-blue-950/80 border border-blue-500/80 text-blue-300 hover:bg-blue-900 hover:text-white transition-all shadow-sm shadow-blue-950/50 cursor-pointer animate-pulse"
+                    title="Click to view all related triplet edges in the explorer"
+                  >
+                    <Share2 className="w-3 h-3 text-blue-400" />
+                    <span>{relatedEdges.length} Related Triplet{relatedEdges.length > 1 ? 's' : ''} &rarr;</span>
+                  </button>
+                )}
               </div>
               <input
                 type="text"
@@ -2345,9 +2665,14 @@ export default function App() {
                 </button>
                 <button
                   onClick={() => setExploreTab('EDGES')}
-                  className={`px-3 py-1 rounded text-[10px] font-bold uppercase transition-colors cursor-pointer ${exploreTab === 'EDGES' ? 'bg-neutral-800 text-white' : 'text-neutral-500 hover:text-neutral-300'}`}
+                  className={`px-3 py-1 rounded text-[10px] font-bold uppercase transition-colors cursor-pointer flex items-center gap-1.5 ${exploreTab === 'EDGES' ? 'bg-neutral-800 text-white' : 'text-neutral-500 hover:text-neutral-300'}`}
                 >
-                  Triplet Edges ({edgesList.length})
+                  <span>Triplet Edges ({edgesList.length})</span>
+                  {selectedNodeId && relatedEdges.length > 0 && (
+                    <span className="px-1.5 py-0.2 rounded-full text-[9px] bg-blue-500/20 text-blue-300 border border-blue-500/60 font-mono font-bold">
+                      {relatedEdges.length} linked
+                    </span>
+                  )}
                 </button>
               </div>
             </div>
@@ -2365,15 +2690,41 @@ export default function App() {
                       <div className="space-y-2">
                         {nodesList
                           .filter(n => n.text.toLowerCase().includes(lorepackSearchQuery.toLowerCase()))
-                          .slice((nodesPage - 1) * ITEMS_PER_PAGE, nodesPage * ITEMS_PER_PAGE).map((node) => (
+                          .slice((nodesPage - 1) * ITEMS_PER_PAGE, nodesPage * ITEMS_PER_PAGE).map((node) => {
+                          const isSelected = selectedRecord?.id === node.id;
+                          const isLinkedToSelectedEdge = selectedEdgeSourceId === node.id;
+                          const nodeEdgesCount = edgesList.filter((e) => e.sourceId === node.id || (node.text && e.s && e.o && node.text.toLowerCase().includes(e.s.toLowerCase()) && node.text.toLowerCase().includes(e.o.toLowerCase()))).length;
+
+                          return (
                           <div
                             key={node.id}
                             onClick={() => setSelectedRecord(node)}
-                            className={`p-2.5 rounded border text-left cursor-pointer transition-colors ${selectedRecord?.id === node.id ? 'bg-neutral-950 border-emerald-500/50' : 'bg-neutral-950/40 border-neutral-800/80 hover:border-neutral-700'}`}
+                            className={`p-2.5 rounded border text-left cursor-pointer transition-all ${
+                              isSelected
+                                ? 'bg-neutral-950 border-emerald-500 shadow-md shadow-emerald-950/50 ring-2 ring-emerald-500/40'
+                                : isLinkedToSelectedEdge
+                                ? 'bg-blue-950/30 border-blue-500/60 shadow-sm shadow-blue-950/30 ring-1 ring-blue-500/20'
+                                : 'bg-neutral-950/40 border-neutral-800/80 hover:border-neutral-700'
+                            }`}
                           >
                             <div className="flex items-center justify-between text-[10px] mb-1 font-mono">
                               <span className="text-neutral-400 truncate max-w-[120px] font-bold uppercase">&gt; {node.source}</span>
-                              <span className="text-neutral-500 font-mono text-[9px]">{new Date(node.timestamp).toLocaleTimeString()}</span>
+                              <div className="flex items-center gap-1.5">
+                                {nodeEdgesCount > 0 && (
+                                  <span
+                                    className={`px-1.5 py-0.2 rounded text-[9px] font-mono flex items-center gap-1 ${
+                                      isSelected
+                                        ? 'bg-blue-950 text-blue-300 border border-blue-700 font-bold'
+                                        : 'bg-neutral-900 text-neutral-400 border border-neutral-800'
+                                    }`}
+                                    title={`${nodeEdgesCount} semantic relationship triplet(s) linked to this node`}
+                                  >
+                                    <Share2 className="w-2.5 h-2.5 text-blue-400" />
+                                    <span>{nodeEdgesCount}</span>
+                                  </span>
+                                )}
+                                <span className="text-neutral-500 font-mono text-[9px]">{new Date(node.timestamp).toLocaleTimeString()}</span>
+                              </div>
                             </div>
                             <p className="text-xs text-neutral-300 line-clamp-2 leading-relaxed font-mono">
                               {lorepackSearchQuery 
@@ -2384,33 +2735,131 @@ export default function App() {
                                 : node.text
                               }
                             </p>
+
+                            {/* Direct Action Shortcut when Node is Selected */}
+                            {isSelected && nodeEdgesCount > 0 && (
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setSelectedRecord(node);
+                                  setExploreTab('EDGES');
+                                  setShowOnlyLinkedEdges(true);
+                                  setEdgesPage(1);
+                                }}
+                                className="mt-2 w-full text-[10px] font-mono text-blue-300 hover:text-white flex items-center justify-between bg-blue-950/80 border border-blue-600/70 hover:border-blue-500 px-2.5 py-1 rounded cursor-pointer transition-all shadow-sm shadow-blue-950"
+                              >
+                                <span className="flex items-center gap-1.5">
+                                  <Share2 className="w-3 h-3 text-blue-400 animate-pulse" />
+                                  <span>{nodeEdgesCount} Connected Triplet{nodeEdgesCount > 1 ? 's' : ''} Highlighted</span>
+                                </span>
+                                <span className="font-bold">&rarr;</span>
+                              </button>
+                            )}
                           </div>
-                        ))}
+                          );
+                        })}
                       </div>
                     )
                   ) : (
-                    edgesList.length === 0 ? (
-                      <div className="h-full flex items-center justify-center py-10">
-                        <p className="text-xs text-neutral-500 uppercase tracking-wider">No compiled triplets found</p>
+                    displayedEdges.length === 0 ? (
+                      <div className="h-full flex flex-col items-center justify-center py-10 gap-2">
+                        <p className="text-xs text-neutral-500 uppercase tracking-wider">
+                          {showOnlyLinkedEdges ? 'No linked triplets found for selected node' : 'No compiled triplets found'}
+                        </p>
+                        {showOnlyLinkedEdges && (
+                          <button
+                            type="button"
+                            onClick={() => setShowOnlyLinkedEdges(false)}
+                            className="text-[10px] font-mono text-blue-400 hover:text-blue-300 underline cursor-pointer"
+                          >
+                            Show All Triplet Edges
+                          </button>
+                        )}
                       </div>
                     ) : (
                       <div className="space-y-2">
-                        {edgesList
-                          .filter(e => e.s.toLowerCase().includes(lorepackSearchQuery.toLowerCase()) || e.o.toLowerCase().includes(lorepackSearchQuery.toLowerCase()))
-                          .slice((edgesPage - 1) * ITEMS_PER_PAGE, edgesPage * ITEMS_PER_PAGE).map((edge) => (
+                        {/* Relationship Context Banner */}
+                        {selectedNodeId && (
+                          <div className="bg-blue-950/50 border border-blue-500/60 p-2.5 rounded mb-2.5 flex flex-col sm:flex-row sm:items-center justify-between gap-2 shadow-lg shadow-blue-950/40">
+                            <div className="flex items-center gap-2 min-w-0">
+                              <Share2 className="w-3.5 h-3.5 text-blue-400 shrink-0 animate-pulse" />
+                              <div className="text-[11px] font-mono min-w-0">
+                                <span className="text-neutral-400">Node: </span>
+                                <span className="text-blue-300 font-bold truncate inline-block max-w-[120px] align-bottom">{selectedNodeId}</span>
+                                <span className="text-neutral-400"> &bull; </span>
+                                <span className="text-emerald-400 font-bold">{relatedEdges.length} Related Triplet{relatedEdges.length === 1 ? '' : 's'}</span>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-2 shrink-0">
+                              {relatedEdges.length > 0 && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setShowOnlyLinkedEdges(!showOnlyLinkedEdges);
+                                    setEdgesPage(1);
+                                  }}
+                                  className={`px-2.5 py-1 rounded text-[10px] font-mono font-bold uppercase transition-colors cursor-pointer flex items-center gap-1.5 ${
+                                    showOnlyLinkedEdges
+                                      ? 'bg-blue-500 text-neutral-950 font-bold shadow-sm shadow-blue-400/50'
+                                      : 'bg-neutral-800 text-blue-300 hover:bg-neutral-700 border border-neutral-700'
+                                  }`}
+                                >
+                                  <span>{showOnlyLinkedEdges ? 'Show All Edges' : 'Show Only Linked'}</span>
+                                </button>
+                              )}
+                              <button
+                                type="button"
+                                onClick={() => setExploreTab('NODES')}
+                                className="px-2 py-0.5 rounded text-[9px] font-mono text-neutral-400 hover:text-white bg-neutral-900 border border-neutral-800 cursor-pointer transition-colors"
+                              >
+                                &larr; Node View
+                              </button>
+                            </div>
+                          </div>
+                        )}
+
+                        {displayedEdges
+                          .slice((edgesPage - 1) * ITEMS_PER_PAGE, edgesPage * ITEMS_PER_PAGE).map((edge) => {
+                          const isDirectlySelected = selectedRecord?.id === edge.id;
+                          const isRelatedToSelectedNode = relatedEdgeIds.has(edge.id);
+
+                          return (
                           <div
                             key={edge.id}
                             onClick={() => setSelectedRecord(edge)}
-                            className={`p-2 rounded border text-left cursor-pointer transition-colors ${selectedRecord?.id === edge.id ? 'bg-neutral-950 border-blue-500/50' : 'bg-neutral-950/40 border-neutral-800/80 hover:border-neutral-700'}`}
+                            className={`p-2.5 rounded border text-left cursor-pointer transition-all ${
+                              isDirectlySelected
+                                ? 'bg-neutral-950 border-blue-500 shadow-md shadow-blue-950/50 ring-2 ring-blue-500/50'
+                                : isRelatedToSelectedNode
+                                ? 'bg-blue-950/60 border-blue-400 shadow-lg shadow-blue-950/60 ring-2 ring-blue-500/40'
+                                : 'bg-neutral-950/40 border-neutral-800/80 hover:border-neutral-700'
+                            }`}
                           >
-                            <div className="flex items-center gap-1.5 flex-wrap">
-                              <span className="text-[10px] font-bold text-blue-400 font-mono truncate max-w-[100px]">{edge.s}</span>
-                              <span className="text-neutral-500 text-[10px] font-semibold">--({edge.r})--&gt;</span>
-                              <span className="text-[10px] font-bold text-emerald-400 font-mono truncate max-w-[100px]">{edge.o}</span>
+                            <div className="flex items-center justify-between gap-1 mb-1.5">
+                              <div className="flex items-center gap-1.5 flex-wrap flex-1 min-w-0">
+                                <span className={`text-[10px] font-bold font-mono truncate max-w-[120px] ${isRelatedToSelectedNode ? 'text-blue-300' : 'text-blue-400'}`}>
+                                  {edge.s}
+                                </span>
+                                <span className="text-neutral-500 text-[10px] font-semibold">--({edge.r})--&gt;</span>
+                                <span className={`text-[10px] font-bold font-mono truncate max-w-[120px] ${isRelatedToSelectedNode ? 'text-emerald-300' : 'text-emerald-400'}`}>
+                                  {edge.o}
+                                </span>
+                              </div>
+                              {isRelatedToSelectedNode && (
+                                <span className="text-[8px] uppercase tracking-wider font-mono font-bold px-2 py-0.5 rounded bg-blue-500/30 text-blue-200 border border-blue-400 shrink-0 flex items-center gap-1">
+                                  <span className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-ping" />
+                                  <span>RELATIONSHIP LINKED</span>
+                                </span>
+                              )}
                             </div>
-                            <p className="text-[9px] text-neutral-500 font-mono uppercase mt-1">Source ID: {edge.sourceId.slice(0,8)}...</p>
+                            <div className="flex items-center justify-between text-[9px] text-neutral-500 font-mono uppercase">
+                              <span>Source ID: {edge.sourceId ? edge.sourceId.slice(0, 12) + '...' : 'UNKNOWN'}</span>
+                              {edge.agentId && <span>Agent: {edge.agentId}</span>}
+                            </div>
                           </div>
-                        ))}
+                          );
+                        })}
                       </div>
                     )
                   )}
@@ -2440,7 +2889,7 @@ export default function App() {
                     </div>
                   )
                 ) : (
-                  edgesList.length > ITEMS_PER_PAGE && (
+                  displayedEdges.length > ITEMS_PER_PAGE && (
                     <div className="flex items-center justify-between border-t border-neutral-800 pt-3 mt-2">
                       <button
                         onClick={() => setEdgesPage((p) => Math.max(1, p - 1))}
@@ -2450,11 +2899,11 @@ export default function App() {
                         <ChevronLeft className="h-3.5 w-3.5" />
                       </button>
                       <span className="text-[10px] font-mono font-bold text-neutral-400 uppercase tracking-wider">
-                        Page {edgesPage} of {Math.ceil(edgesList.length / ITEMS_PER_PAGE)}
+                        Page {edgesPage} of {Math.ceil(displayedEdges.length / ITEMS_PER_PAGE)}
                       </span>
                       <button
-                        onClick={() => setEdgesPage((p) => Math.min(Math.ceil(edgesList.length / ITEMS_PER_PAGE), p + 1))}
-                        disabled={edgesPage >= Math.ceil(edgesList.length / ITEMS_PER_PAGE)}
+                        onClick={() => setEdgesPage((p) => Math.min(Math.ceil(displayedEdges.length / ITEMS_PER_PAGE), p + 1))}
+                        disabled={edgesPage >= Math.ceil(displayedEdges.length / ITEMS_PER_PAGE)}
                         className="bg-neutral-950 border border-neutral-800 hover:border-neutral-700 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed text-neutral-400 p-1.5 rounded transition-colors cursor-pointer"
                       >
                         <ChevronRight className="h-3.5 w-3.5" />
@@ -2479,7 +2928,7 @@ export default function App() {
                         {selectedRecord.text && (
                           <div>
                             <span className="text-[10px] text-neutral-500 uppercase block font-semibold mb-1">Payload Content</span>
-                            <p className="text-xs text-neutral-300 font-mono leading-relaxed bg-neutral-950 border border-neutral-800 p-2.5 rounded max-h-[140px] overflow-y-auto">
+                            <p className="text-xs text-neutral-300 font-mono leading-relaxed bg-neutral-950 border border-neutral-800 p-2.5 rounded max-h-[110px] overflow-y-auto">
                               {selectedRecord.text}
                             </p>
                           </div>
@@ -2494,23 +2943,122 @@ export default function App() {
                             </p>
                           </div>
                         )}
+
+                        {/* Connected Triplet Relationships Section for Vector Nodes */}
+                        {selectedNodeId && (
+                          <div className="bg-neutral-950 border border-neutral-800 p-3 rounded space-y-2">
+                            <div className="flex items-center justify-between pb-1.5 border-b border-neutral-800">
+                              <div className="flex items-center gap-1.5">
+                                <Share2 className="w-3.5 h-3.5 text-blue-400" />
+                                <span className="text-[10px] font-bold uppercase tracking-wider text-blue-300">
+                                  Connected Triplet Edges ({relatedEdges.length})
+                                </span>
+                              </div>
+                              {relatedEdges.length > 0 && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setExploreTab('EDGES');
+                                    setShowOnlyLinkedEdges(true);
+                                    setEdgesPage(1);
+                                  }}
+                                  className="text-[9px] font-mono text-blue-400 hover:text-blue-200 flex items-center gap-1 cursor-pointer transition-colors"
+                                >
+                                  <span>View In Edges Tab</span>
+                                  <ChevronRight className="w-3 h-3" />
+                                </button>
+                              )}
+                            </div>
+
+                            {relatedEdges.length > 0 ? (
+                              <div className="space-y-1.5 max-h-[140px] overflow-y-auto pr-1">
+                                {relatedEdges.map((relEdge) => (
+                                  <div
+                                    key={relEdge.id}
+                                    onClick={() => setSelectedRecord(relEdge)}
+                                    className="p-2 rounded bg-neutral-900 border border-blue-900/60 hover:border-blue-500/80 cursor-pointer transition-all hover:bg-neutral-850 flex items-center justify-between gap-2 group"
+                                    title="Click to inspect this triplet relationship in detail"
+                                  >
+                                    <div className="flex items-center gap-1.5 flex-wrap min-w-0 text-[10px] font-mono">
+                                      <span className="font-bold text-blue-400 truncate max-w-[90px]">{relEdge.s}</span>
+                                      <span className="text-neutral-500 text-[9px] font-semibold">--({relEdge.r})--&gt;</span>
+                                      <span className="font-bold text-emerald-400 truncate max-w-[90px]">{relEdge.o}</span>
+                                    </div>
+                                    <span className="text-[8px] font-mono text-neutral-500 group-hover:text-blue-300 transition-colors uppercase shrink-0">
+                                      Inspect &rarr;
+                                    </span>
+                                  </div>
+                                ))}
+                              </div>
+                            ) : (
+                              <div className="p-2.5 rounded bg-neutral-900/40 border border-neutral-800/60 text-center">
+                                <p className="text-[10px] text-neutral-500 font-mono">
+                                  No semantic triplet edges currently linked to this node.
+                                </p>
+                                <p className="text-[9px] text-neutral-600 font-mono mt-0.5">
+                                  Run &quot;Build Graph&quot; to synthesize subject-predicate-object relationships.
+                                </p>
+                              </div>
+                            )}
+                          </div>
+                        )}
+
+                        {/* Triplet Record Subject-Relation-Target Struct */}
                         {selectedRecord.s && (
-                          <div className="bg-neutral-950 border border-neutral-800 p-3 rounded">
-                            <span className="text-[10px] text-neutral-500 uppercase block font-semibold mb-2">Subject Action Target Struct</span>
-                            <div className="grid grid-cols-3 gap-2 text-center text-[10px] font-mono">
-                              <div className="bg-neutral-900 p-1.5 rounded border border-neutral-800 text-blue-400">
-                                <span className="block text-[8px] text-neutral-500 uppercase mb-0.5">Subject</span>
-                                {selectedRecord.s}
-                              </div>
-                              <div className="bg-neutral-900 p-1.5 rounded border border-neutral-800 text-neutral-300">
-                                <span className="block text-[8px] text-neutral-500 uppercase mb-0.5">Relation</span>
-                                {selectedRecord.r}
-                              </div>
-                              <div className="bg-neutral-900 p-1.5 rounded border border-neutral-800 text-emerald-400">
-                                <span className="block text-[8px] text-neutral-500 uppercase mb-0.5">Target</span>
-                                {selectedRecord.o}
+                          <div className="space-y-2">
+                            <div className="bg-neutral-950 border border-neutral-800 p-3 rounded">
+                              <span className="text-[10px] text-neutral-500 uppercase block font-semibold mb-2">Subject Action Target Struct</span>
+                              <div className="grid grid-cols-3 gap-2 text-center text-[10px] font-mono">
+                                <div className="bg-neutral-900 p-1.5 rounded border border-neutral-800 text-blue-400">
+                                  <span className="block text-[8px] text-neutral-500 uppercase mb-0.5">Subject</span>
+                                  {selectedRecord.s}
+                                </div>
+                                <div className="bg-neutral-900 p-1.5 rounded border border-neutral-800 text-neutral-300">
+                                  <span className="block text-[8px] text-neutral-500 uppercase mb-0.5">Relation</span>
+                                  {selectedRecord.r}
+                                </div>
+                                <div className="bg-neutral-900 p-1.5 rounded border border-neutral-800 text-emerald-400">
+                                  <span className="block text-[8px] text-neutral-500 uppercase mb-0.5">Target</span>
+                                  {selectedRecord.o}
+                                </div>
                               </div>
                             </div>
+
+                            {/* Originating Source Node preview & jump link */}
+                            {(() => {
+                              const sourceNode = nodesList.find((n) => n.id === selectedRecord.sourceId);
+                              return (
+                                <div className="bg-neutral-950 border border-neutral-800 p-3 rounded">
+                                  <div className="flex items-center justify-between mb-1.5 pb-1 border-b border-neutral-800/80">
+                                    <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-400">
+                                      Originating Vector Node
+                                    </span>
+                                    {sourceNode && (
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          setSelectedRecord(sourceNode);
+                                          setExploreTab('NODES');
+                                        }}
+                                        className="text-[9px] font-mono text-emerald-400 hover:text-emerald-300 underline cursor-pointer flex items-center gap-1"
+                                      >
+                                        <span>Inspect Node</span>
+                                        <ChevronRight className="w-2.5 h-2.5" />
+                                      </button>
+                                    )}
+                                  </div>
+                                  {sourceNode ? (
+                                    <p className="text-[10px] font-mono text-neutral-300 line-clamp-2 leading-relaxed bg-neutral-900 p-2 rounded border border-neutral-800">
+                                      {sourceNode.text}
+                                    </p>
+                                  ) : (
+                                    <p className="text-[10px] font-mono text-neutral-500">
+                                      Source Node ID: {selectedRecord.sourceId || 'N/A'}
+                                    </p>
+                                  )}
+                                </div>
+                              );
+                            })()}
                           </div>
                         )}
                       </div>
@@ -2529,7 +3077,8 @@ export default function App() {
               </div>
             </div>
           </section>
-            )}
+              );
+            })()}
 
             {/* Module F & G: Transport & Keys (when in transport tab) */}
             {activeNavTab === 'transport' && (
@@ -2633,13 +3182,15 @@ export default function App() {
               <div>
                 <button
                   onClick={handleExportLorepack}
-                  disabled={exporting || stats.totalNodes === 0}
+                  disabled={exporting || stats.totalNodes === 0 || hasUnresolvedFailures}
                   className="w-full bg-neutral-950 border border-neutral-800 hover:border-neutral-700 text-neutral-200 font-bold px-4 py-2 rounded text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
                 >
                   <Download className="h-3.5 w-3.5" />
-                  Export Compiled Archive (.JSONL)
+                  {hasUnresolvedFailures ? 'Export Blocked (Ingest Failures)' : 'Export Compiled Archive (.JSONL)'}
                 </button>
               </div>
+
+              {exportProgressBar}
 
               {/* Divider */}
               <div className="relative flex py-1 items-center">

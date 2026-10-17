@@ -87,58 +87,6 @@ async function retryWithBackoff<T>(
   }
 }
 
-function generateDeterministicEmbeddingServer(text: string, dimension = 768): number[] {
-  const vec = new Float64Array(dimension);
-  const clean = (text || '').toLowerCase().trim();
-  if (!clean) {
-    vec[0] = 1.0;
-    return Array.from(vec);
-  }
-
-  const words = clean.split(/\s+/).filter(Boolean);
-
-  const hashString = (str: string, seed = 0): number => {
-    let h = 0x811c9dc5 ^ seed;
-    for (let i = 0; i < str.length; i++) {
-      h ^= str.charCodeAt(i);
-      h = Math.imul(h, 0x01000193);
-    }
-    return Math.abs(h);
-  };
-
-  for (let i = 0; i < words.length; i++) {
-    const word = words[i];
-    const weight = 1.0 / Math.sqrt(i + 1);
-    for (let seed = 0; seed < 4; seed++) {
-      const idx = hashString(word, seed) % dimension;
-      const sign = hashString(word, seed + 10) % 2 === 0 ? 1 : -1;
-      vec[idx] += weight * sign;
-    }
-  }
-
-  const n = 3;
-  for (let i = 0; i <= clean.length - n; i++) {
-    const gram = clean.slice(i, i + n);
-    const idx = hashString(gram, 13) % dimension;
-    const sign = hashString(gram, 27) % 2 === 0 ? 1 : -1;
-    vec[idx] += 0.5 * sign;
-  }
-
-  let sumSq = 0;
-  for (let i = 0; i < dimension; i++) {
-    sumSq += vec[i] * vec[i];
-  }
-  const norm = Math.sqrt(sumSq);
-  if (norm > 0) {
-    for (let i = 0; i < dimension; i++) {
-      vec[i] = Number((vec[i] / norm).toFixed(6));
-    }
-  } else {
-    vec[0] = 1.0;
-  }
-
-  return Array.from(vec);
-}
 
 function extractHeuristicTripletsServer(text: string): Array<{ s: string; r: string; o: string }> {
   if (!text || typeof text !== 'string' || !text.trim()) return [];
@@ -333,45 +281,46 @@ export async function createServer() {
   // API Route: Embed Content
   app.post('/api/lorepack/embed', requireBuilderAuth, async (req, res) => {
     try {
-      const { text } = req.body;
+      const { text, model } = req.body;
       if (!text || typeof text !== 'string') {
         res.status(400).json({ error: 'Text input is required' });
         return;
       }
 
-      let embedding: number[] | null = null;
-      try {
-        const ai = getAI();
-        const result = await retryWithBackoff(() => 
-          ai.models.embedContent({
-            model: 'gemini-embedding-2',
-            contents: text,
-          }),
-          2,
-          1000
-        );
+      const embeddingModel = (typeof model === 'string' && model.trim()) ? model.trim() : 'gemini-embedding-2';
+      const ai = getAI();
+      const result = await retryWithBackoff(() => 
+        ai.models.embedContent({
+          model: embeddingModel,
+          contents: text,
+        }),
+        2,
+        1000
+      );
 
-        const resAny = result as any;
-        if (Array.isArray(resAny.embeddings)) {
-          embedding = resAny.embeddings[0]?.values || null;
-        } else if (resAny.embedding?.values) {
-          embedding = resAny.embedding.values;
-        } else if (resAny.embeddings && resAny.embeddings.values) {
-          embedding = resAny.embeddings.values;
-        }
-      } catch (geminiErr: any) {
-        console.warn('[Server] Gemini embedding API rate limited or unavailable, falling back to deterministic vector:', geminiErr.message);
-        embedding = generateDeterministicEmbeddingServer(text, 768);
+      let embedding: number[] | null = null;
+      const resAny = result as any;
+      if (Array.isArray(resAny.embeddings)) {
+        embedding = resAny.embeddings[0]?.values || null;
+      } else if (resAny.embedding?.values) {
+        embedding = resAny.embedding.values;
+      } else if (resAny.embeddings && resAny.embeddings.values) {
+        embedding = resAny.embeddings.values;
       }
 
       if (!embedding) {
-        embedding = generateDeterministicEmbeddingServer(text, 768);
+        res.status(502).json({ error: { message: 'Gemini API returned empty embedding' } });
+        return;
       }
 
       res.json({ embedding });
     } catch (error: any) {
-      console.error('[Server] Embedding generation failed:', error);
-      res.json({ embedding: generateDeterministicEmbeddingServer(req.body?.text || '', 768) });
+      const status = error?.status || error?.statusCode || 500;
+      const message = error?.message || String(error);
+      console.error(`[Server] Embedding generation failed (status ${status}):`, message);
+      res.status(status >= 400 && status < 600 ? status : 500).json({
+        error: { message }
+      });
     }
   });
 
@@ -553,6 +502,42 @@ ${text}`,
           'text-bison-001'
         ]
       });
+    }
+  });
+
+  // API Route: List Embedding Models
+  app.get('/api/lorepack/embedding-models', requireBuilderAuth, async (req, res) => {
+    const defaultEmbeddingModels = ['gemini-embedding-2', 'text-embedding-004', 'gemini-embedding-001'];
+    try {
+      const apiKey = process.env.GEMINI_API_KEY;
+      if (apiKey) {
+        try {
+          const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`);
+          if (response.ok) {
+            const data = await response.json();
+            const models = data.models || [];
+            const fetched = models
+              .map((m: any) => (m.name || '').replace('models/', ''))
+              .filter((name: string) => {
+                const lower = name.toLowerCase();
+                return lower.includes('embedding') || lower.includes('embed');
+              });
+
+            if (fetched.length > 0) {
+              const combined = Array.from(new Set(['gemini-embedding-2', ...fetched, ...defaultEmbeddingModels]));
+              res.json({ models: combined });
+              return;
+            }
+          }
+        } catch (apiErr) {
+          console.warn('[Server] External embedding model fetch error, falling back to default list:', apiErr);
+        }
+      }
+
+      res.json({ models: defaultEmbeddingModels });
+    } catch (error: any) {
+      console.error('[Server] Embedding model listing failed:', error);
+      res.json({ models: defaultEmbeddingModels });
     }
   });
 

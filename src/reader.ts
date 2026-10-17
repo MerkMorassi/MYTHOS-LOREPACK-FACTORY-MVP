@@ -328,6 +328,11 @@ export class LorepackReader {
         throw new Error(`Line ${lineNum}: Invalid JSON record (${err.message || err})`);
       }
 
+      if (entry.type === 'header' || entry.type === 'manifest') {
+        // Stamped Lorepack archive manifest record — record metadata if present
+        return;
+      }
+
       if (entry.type === 'edge') {
         if (
           !entry.id &&

@@ -1,5 +1,6 @@
 import type {
   ImportProgress,
+  ExportProgress,
   LorepackModel,
   LorepackStore,
   TripletEdge,
@@ -70,6 +71,20 @@ export class LorepackFactory {
     return this.packer.chunk(text, maxChars);
   }
 
+  async verifyWorkspaceHomogeneity(
+    agentId: string,
+    targetModel?: string,
+    targetDim?: number
+  ): Promise<{
+    valid: boolean;
+    totalNodes: number;
+    existingModel?: string;
+    existingDim?: number;
+    reason?: string;
+  }> {
+    return this.packer.verifyWorkspaceHomogeneity(agentId, targetModel, targetDim);
+  }
+
   async ingestBatches(
     batches: Array<{ text: string; source: string }>,
     options: {
@@ -77,6 +92,7 @@ export class LorepackFactory {
       onProgress?: (progress: { processed: number; written: number; total: number }) => void;
       signal?: AbortSignal;
       batchSize?: number;
+      embeddingModel?: string;
     }
   ): Promise<{ ingested: number; failed: Array<{ text: string; reason: string }> }> {
     return this.packer.ingestBatches(batches, options);
@@ -113,17 +129,26 @@ export class LorepackFactory {
 
   async exportLorepack(
     agentId: string,
-    options?: { gzip?: boolean }
+    options?: {
+      gzip?: boolean;
+      onProgress?: (progress: ExportProgress) => void;
+    }
   ): Promise<{ blob: Blob; count: number; filename: string }> {
     return this.packer.exportLorepack(agentId, options);
   }
 
-  async exportToGz(agentId: string): Promise<{ blob: Blob; count: number; filename: string }> {
-    return this.packer.exportToGz(agentId);
+  async exportToGz(
+    agentId: string,
+    onProgress?: (progress: ExportProgress) => void
+  ): Promise<{ blob: Blob; count: number; filename: string }> {
+    return this.packer.exportToGz(agentId, onProgress);
   }
 
-  async exportToJsonl(agentId: string): Promise<{ blob: Blob; count: number; filename: string }> {
-    return this.packer.exportToJsonl(agentId);
+  async exportToJsonl(
+    agentId: string,
+    onProgress?: (progress: ExportProgress) => void
+  ): Promise<{ blob: Blob; count: number; filename: string }> {
+    return this.packer.exportToJsonl(agentId, onProgress);
   }
 
   async testPackage(

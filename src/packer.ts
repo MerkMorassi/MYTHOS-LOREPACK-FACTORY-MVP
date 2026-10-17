@@ -3,11 +3,19 @@ import type {
   LorepackStore,
   TripletEdge,
   VectorRecord,
+  ExportProgress,
 } from './types.js';
 import { InMemoryLorepackStore, LorepackReader, isValidVector } from './reader.js';
+import {
+  assertSingleSpace,
+  embedAllResumable,
+  PINNED_MODEL,
+  PINNED_DIM,
+  validateModelCompatibility,
+  MintRefusedError,
+} from './mint-gate.js';
 
 const LAST_SYNC_KEY = 'mythos_lorepack_last_sync';
-const EMBEDDING_MODEL = 'gemini-embedding-2';
 
 export interface PackageTestResult {
   ok: boolean;
@@ -152,6 +160,78 @@ export class LorepackPacker {
   }
 
   // ------------------------------------------------------------
+  // PRE-MINTING INTEGRITY & HOMOGENEITY CHECKS
+  // ------------------------------------------------------------
+
+  async verifyWorkspaceHomogeneity(
+    agentId: string,
+    targetModel: string = PINNED_MODEL,
+    targetDim: number = PINNED_DIM
+  ): Promise<{
+    valid: boolean;
+    totalNodes: number;
+    existingModel?: string;
+    existingDim?: number;
+    reason?: string;
+  }> {
+    const nodes = await this.store.getVectorsByAgent(agentId);
+    if (nodes.length === 0) {
+      return { valid: true, totalNodes: 0 };
+    }
+
+    const dims = new Set(nodes.map((n) => n.vector.length));
+    const models = new Set(
+      nodes.map((n) => ((n.metadata as any)?.embeddingModel as string) || '').filter(Boolean)
+    );
+
+    if (dims.size > 1) {
+      return {
+        valid: false,
+        totalNodes: nodes.length,
+        reason: `Workspace contains mixed vector dimensions (${Array.from(dims).join(', ')}). Purge agent records before re-minting.`,
+      };
+    }
+
+    if (models.size > 1) {
+      return {
+        valid: false,
+        totalNodes: nodes.length,
+        reason: `Workspace contains mixed embedding models (${Array.from(models).join(', ')}). Purge agent records before re-minting.`,
+      };
+    }
+
+    const currentDim = nodes[0].vector.length;
+    const currentModel = (nodes[0].metadata as any)?.embeddingModel || '';
+
+    if (targetDim && currentDim !== targetDim) {
+      return {
+        valid: false,
+        totalNodes: nodes.length,
+        existingDim: currentDim,
+        existingModel: currentModel,
+        reason: `Dimension mismatch: Existing workspace uses ${currentDim}-D vectors, but target minting model requires ${targetDim}-D. Purge agent memory or select a matching ${currentDim}-D model.`,
+      };
+    }
+
+    if (targetModel && currentModel && currentModel !== targetModel) {
+      return {
+        valid: false,
+        totalNodes: nodes.length,
+        existingDim: currentDim,
+        existingModel: currentModel,
+        reason: `Model mismatch: Existing workspace is indexed with "${currentModel}", but "${targetModel}" was selected. One agent locus cannot mix models. Purge agent records to re-index.`,
+      };
+    }
+
+    return {
+      valid: true,
+      totalNodes: nodes.length,
+      existingDim: currentDim,
+      existingModel: currentModel,
+    };
+  }
+
+  // ------------------------------------------------------------
   // INGEST
   // ------------------------------------------------------------
 
@@ -162,102 +242,152 @@ export class LorepackPacker {
       onProgress?: (progress: { processed: number; written: number; total: number }) => void;
       signal?: AbortSignal;
       batchSize?: number;
+      embeddingModel?: string;
     }
   ): Promise<{ ingested: number; failed: Array<{ text: string; reason: string }> }> {
-    const batchSize = options.batchSize || 40;
-    const concurrency = 5;
-    let processed = 0;
-    let written = 0;
     const failed: Array<{ text: string; reason: string }> = [];
+    if (batches.length === 0) {
+      return { ingested: 0, failed };
+    }
 
-    const groups = Array.from({ length: Math.ceil(batches.length / batchSize) }, (_, index) =>
-      batches.slice(index * batchSize, (index + 1) * batchSize)
-    );
+    const activeModel = options.embeddingModel || PINNED_MODEL;
 
-    const runGroup = async (group: Array<{ text: string; source: string }>) => {
-      if (options.signal?.aborted) throw new Error('Aborted');
-
-      let embeddings: Array<number[] | null | undefined> = [];
-      try {
-        if (typeof this.model.getEmbeddingsBatch === 'function') {
-          embeddings = await this.model.getEmbeddingsBatch(group.map((e) => e.text));
-        } else {
-          embeddings = await Promise.all(group.map((entry) => this.model.getEmbeddings(entry.text)));
-        }
-      } catch (err: any) {
-        // Explicitly record batch embedding failure instead of silent drop or disguise
-        for (const entry of group) {
-          failed.push({
-            text: entry.text,
-            reason: `Batch embedding API failed: ${err.message || err}`,
-          });
-        }
-        processed += group.length;
-        options.onProgress?.({ processed, written, total: batches.length });
-        return;
-      }
-
-      const timestamp = new Date().toISOString();
-      const records: VectorRecord[] = [];
-
-      for (const [index, entry] of group.entries()) {
-        const vector = embeddings[index];
-        if (!isValidVector(vector)) {
-          failed.push({
-            text: entry.text,
-            reason: 'Embedding returned invalid or empty vector (API unavailable or rejected).',
-          });
-          continue;
-        }
-
-        // Determine authentic model name
-        const modelName = EMBEDDING_MODEL;
-        
-        // Generate deterministic fingerprint-based ID (Content-Addressable)
-        const fingerprint = await this.computeFingerprint(`${options.agentId}:${entry.text.trim().toLowerCase()}`);
-
-        records.push({
-          id: `lp_node_${fingerprint}`,
-          agentId: options.agentId,
-          text: entry.text,
-          vector,
-          numMarkId: this.genSigil(entry.text),
-          source: entry.source || 'UNKNOWN',
-          timestamp: Date.now(),
-          metadata: {
-            source: entry.source || 'UNKNOWN',
-            timestamp,
-            locus: `MYTHOS.LORE.${options.agentId}`,
-            embeddingModel: modelName,
-            embeddingDimension: vector.length,
-            embeddingEpoch: modelName,
-            fingerprint,
-          },
+    // 0. Pre-minting workspace homogeneity verification
+    const preCheck = await this.verifyWorkspaceHomogeneity(options.agentId, activeModel, PINNED_DIM);
+    if (!preCheck.valid) {
+      const err = new MintRefusedError(`PRE-MINT REFUSED :: ${preCheck.reason}`);
+      for (const entry of batches) {
+        failed.push({
+          text: entry.text.slice(0, 80),
+          reason: preCheck.reason || 'Workspace homogeneity failure',
         });
       }
+      throw err;
+    }
 
-      if (records.length > 0) {
-        await this.store.addRecordsAtomic(records, []);
-      }
-      processed += group.length;
-      written += records.length;
-      options.onProgress?.({ processed, written, total: batches.length });
+    // 1. Stage records deterministically with content-addressable ID
+    const stagedEntries = await Promise.all(
+      batches.map(async (entry) => {
+        const fingerprint = await this.computeFingerprint(`${options.agentId}:${entry.text.trim().toLowerCase()}`);
+        return {
+          id: `lp_node_${fingerprint}`,
+          text: entry.text,
+          source: entry.source || 'UNKNOWN',
+          fingerprint,
+        };
+      })
+    );
+
+    // 2. Prepare checkpoint hooks backed by localStorage
+    const cpKey = `mythos_checkpoint_${options.agentId}`;
+    const hooks = {
+      load: async () => {
+        try {
+          const raw = typeof localStorage !== 'undefined' ? localStorage.getItem(cpKey) : null;
+          return raw ? JSON.parse(raw) : null;
+        } catch {
+          return null;
+        }
+      },
+      save: async (cp: { model: string; dim: number; items: Record<string, number[]> }) => {
+        try {
+          if (typeof localStorage !== 'undefined') {
+            localStorage.setItem(cpKey, JSON.stringify(cp));
+          }
+        } catch {}
+      },
+      onEvent: (msg: string) => {
+        const m = msg.match(/EMBEDDING :: (\d+)\/(\d+)/);
+        if (m) {
+          const processed = parseInt(m[1], 10);
+          options.onProgress?.({ processed, written: processed, total: batches.length });
+        }
+      },
     };
 
-    const pending = new Set<Promise<void>>();
-    for (const group of groups) {
-      if (options.signal?.aborted) throw new Error('Aborted');
-      const task = runGroup(group).finally(() => pending.delete(task));
-      pending.add(task);
-      if (pending.size >= concurrency) await Promise.race(pending);
+    // 3. Resolve API key
+    let key = '';
+    if (this.model && typeof (this.model as any).getKey === 'function') {
+      try {
+        key = (this.model as any).getKey();
+      } catch {}
+    } else if (this.model && typeof (this.model as any)._getKey === 'function') {
+      try {
+        key = (this.model as any)._getKey();
+      } catch {}
     }
-    await Promise.all(pending);
 
-    if (batches.length > 0 && written === 0 && failed.length > 0) {
-      throw new Error(`Ingest failed for all ${batches.length} chunks. Sample error: ${failed[0]?.reason}`);
+    // 4. Sequential embedAllResumable execution
+    let vectorMap: Map<string, number[]>;
+    try {
+      vectorMap = await embedAllResumable(
+        stagedEntries.map((e) => ({ id: e.id, text: e.text })),
+        key,
+        fetch.bind(globalThis),
+        hooks,
+        activeModel,
+        PINNED_DIM,
+        options.batchSize || 10
+      );
+    } catch (err: any) {
+      // Record failed[] with IDs and surface the refusal verbatim
+      for (const entry of stagedEntries) {
+        failed.push({
+          text: entry.id,
+          reason: err.message || String(err),
+        });
+      }
+      throw err;
     }
 
-    return { ingested: written, failed };
+    // 5. Build records stamped with activeModel and actual vector.length
+    const timestamp = new Date().toISOString();
+    const records: VectorRecord[] = [];
+
+    for (const entry of stagedEntries) {
+      const vector = vectorMap.get(entry.id);
+      if (!vector || !isValidVector(vector)) {
+        failed.push({
+          text: entry.id,
+          reason: `Missing or invalid vector for ${entry.id}`,
+        });
+        continue;
+      }
+
+      records.push({
+        id: entry.id,
+        agentId: options.agentId,
+        text: entry.text,
+        vector,
+        numMarkId: this.genSigil(entry.text),
+        source: entry.source,
+        timestamp: Date.now(),
+        metadata: {
+          source: entry.source,
+          timestamp,
+          locus: `MYTHOS.LORE.${options.agentId}`,
+          embeddingModel: activeModel,
+          embeddingDimension: vector.length,
+          embeddingEpoch: activeModel,
+          fingerprint: entry.fingerprint,
+        },
+      });
+    }
+
+    // 6. Atomically persist all successfully embedded records
+    if (records.length > 0) {
+      await this.store.addRecordsAtomic(records, []);
+    }
+
+    // Clean up completed checkpoint
+    try {
+      if (typeof localStorage !== 'undefined') {
+        localStorage.removeItem(cpKey);
+      }
+    } catch {}
+
+    options.onProgress?.({ processed: batches.length, written: records.length, total: batches.length });
+    return { ingested: records.length, failed };
   }
 
   async ingestConversationalTurn(
@@ -275,6 +405,10 @@ export class LorepackPacker {
     
     const fingerprint = await this.computeFingerprint(`${agentId}:${text.trim().toLowerCase()}`);
     
+    const activeModel = typeof (this.model as any).getEmbeddingModel === 'function'
+      ? (this.model as any).getEmbeddingModel()
+      : PINNED_MODEL;
+
     await this.store.addRecordsAtomic(
       [
         {
@@ -289,9 +423,9 @@ export class LorepackPacker {
             source: `chat-log-${new Date().toISOString()}`,
             timestamp: new Date().toISOString(),
             locus: `MYTHOS.LORE.${agentId}`,
-            embeddingModel: EMBEDDING_MODEL,
+            embeddingModel: activeModel,
             embeddingDimension: vector.length,
-            embeddingEpoch: EMBEDDING_MODEL,
+            embeddingEpoch: activeModel,
             fingerprint,
           },
         },
@@ -320,9 +454,16 @@ export class LorepackPacker {
       throw new Error(`Graph integrity failure: ${invalidNodes.length} invalid vector node(s) found.`);
     }
 
-    const dimensions = new Set(nodes.map((n) => n.vector.length));
-    if (dimensions.size > 1) {
-      throw new Error('Graph integrity failure: agent contains multiple vector dimensions.');
+    const dimCounts = new Map<number, number>();
+    for (const n of nodes) {
+      const d = n.vector.length;
+      dimCounts.set(d, (dimCounts.get(d) || 0) + 1);
+    }
+    if (dimCounts.size > 1) {
+      const breakdown = Array.from(dimCounts.entries())
+        .map(([dim, count]) => `${count} node(s) @ ${dim}-D`)
+        .join(', ');
+      throw new Error(`Graph integrity failure: agent contains multiple vector dimensions (${breakdown}). Purge agent records or re-index to homogenize vector space.`);
     }
 
     const batchSize = 5;
@@ -419,27 +560,83 @@ export class LorepackPacker {
 
   async exportLorepack(
     agentId: string,
-    options?: { gzip?: boolean }
+    options?: {
+      gzip?: boolean;
+      onProgress?: (progress: ExportProgress) => void;
+    }
   ): Promise<{ blob: Blob; count: number; filename: string }> {
-    const lines: string[] = [];
-    for await (const batch of this.yieldExportBatches(agentId, 500)) {
+    const vectors = await this.store.getVectorsByAgent(agentId);
+    const edges = await this.store.getTripletEdgesByAgent(agentId);
+    const spaceContract = assertSingleSpace(
+      vectors.map((v) => ({ id: v.id, vec: v.vector, model: (v.metadata as any)?.embeddingModel })),
+      edges.map((e) => ({ id: e.id, src: e.sourceId }))
+    );
+
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const headerRecord = {
+      v: 2,
+      type: 'header',
+      agentId: agentId.toUpperCase(),
+      embeddingModel: spaceContract.model,
+      embeddingDimension: spaceContract.dim,
+      totalVectors: spaceContract.vectors,
+      totalEdges: spaceContract.edges,
+      exportedAt: new Date().toISOString(),
+    };
+
+    const totalRecords = vectors.length + edges.length + 1;
+    options?.onProgress?.({
+      serialized: 1,
+      total: totalRecords,
+      stage: 'serializing',
+      percent: Math.min(10, Math.round((1 / Math.max(1, totalRecords)) * 85)),
+      chunkLabel: 'Archive Header Record',
+    });
+
+    const lines: string[] = [JSON.stringify(headerRecord)];
+    for await (const batch of this.yieldExportBatches(agentId, 25)) {
       for (const item of batch) {
         lines.push(JSON.stringify(item));
+        const currentCount = lines.length;
+        const percent = Math.min(85, Math.max(5, Math.round((currentCount / Math.max(1, totalRecords)) * 85)));
+        const chunkLabel = (item as any).id || (item as any).src || `${(item as any).type} record`;
+        options?.onProgress?.({
+          serialized: currentCount,
+          total: totalRecords,
+          stage: 'serializing',
+          percent,
+          chunkLabel,
+        });
       }
+      // Microtask tick to permit smooth UI progress rendering
+      await new Promise((resolve) => setTimeout(resolve, 0));
     }
-    if (lines.length === 0) {
+    if (lines.length <= 1) {
       throw new Error(`No records found to export for agent locus "${agentId}".`);
     }
 
     const text = lines.join('\n') + '\n';
     const isGzip = options?.gzip ?? true;
-    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
 
     if (isGzip && typeof CompressionStream !== 'undefined') {
+      options?.onProgress?.({
+        serialized: lines.length,
+        total: totalRecords,
+        stage: 'compressing',
+        percent: 92,
+        chunkLabel: 'Streaming to GZIP Compression Stream...',
+      });
       const stream = new Blob([text], { type: 'application/x-jsonlines' })
         .stream()
         .pipeThrough(new CompressionStream('gzip'));
       const blob = await new Response(stream).blob();
+      options?.onProgress?.({
+        serialized: lines.length,
+        total: totalRecords,
+        stage: 'complete',
+        percent: 100,
+        chunkLabel: `GZIP Archive Compiled (${(blob.size / 1024).toFixed(1)} KB)`,
+      });
       return {
         blob,
         count: lines.length,
@@ -447,6 +644,13 @@ export class LorepackPacker {
       };
     } else {
       const blob = new Blob([text], { type: 'application/x-jsonlines' });
+      options?.onProgress?.({
+        serialized: lines.length,
+        total: totalRecords,
+        stage: 'complete',
+        percent: 100,
+        chunkLabel: `JSONL Archive Compiled (${(blob.size / 1024).toFixed(1)} KB)`,
+      });
       return {
         blob,
         count: lines.length,
@@ -455,12 +659,18 @@ export class LorepackPacker {
     }
   }
 
-  async exportToGz(agentId: string): Promise<{ blob: Blob; count: number; filename: string }> {
-    return this.exportLorepack(agentId, { gzip: true });
+  async exportToGz(
+    agentId: string,
+    onProgress?: (progress: ExportProgress) => void
+  ): Promise<{ blob: Blob; count: number; filename: string }> {
+    return this.exportLorepack(agentId, { gzip: true, onProgress });
   }
 
-  async exportToJsonl(agentId: string): Promise<{ blob: Blob; count: number; filename: string }> {
-    return this.exportLorepack(agentId, { gzip: false });
+  async exportToJsonl(
+    agentId: string,
+    onProgress?: (progress: ExportProgress) => void
+  ): Promise<{ blob: Blob; count: number; filename: string }> {
+    return this.exportLorepack(agentId, { gzip: false, onProgress });
   }
 
   // ------------------------------------------------------------

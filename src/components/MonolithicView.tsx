@@ -3,6 +3,7 @@ import { Lock, Edit3, Save, RotateCcw, Plus, Trash2, X, Sparkles, Bookmark, Book
 import { LorepackFactory } from '../lorepack-factory.ts';
 import { IndexedDbLorepackStore } from '../indexeddb-store.ts';
 import { GeminiProvider } from '../providers/gemini-provider.ts';
+import { validateModelCompatibility, SUPPORTED_EMBEDDING_MODELS, PINNED_MODEL } from '../mint-gate.js';
 import { DEFAULT_PERSONA_PRESETS, PersonaPreset } from '../App.tsx';
 import {
   CANONICAL_MYTHOS_AGENTS,
@@ -120,6 +121,9 @@ export const MonolithicView: React.FC<MonolithicViewProps> = ({
 
   // Active Agent Inline Dossier Customization State
   const [showDossierEditor, setShowDossierEditor] = useState<boolean>(false);
+  const [monoName, setMonoName] = useState<string>('');
+  const [monoWorkspace, setMonoWorkspace] = useState<string>('');
+  const [monoRole, setMonoRole] = useState<string>('');
   const [monoTone, setMonoTone] = useState<string>('');
   const [monoConstraints, setMonoConstraints] = useState<string[]>([]);
   const [newMonoConstraint, setNewMonoConstraint] = useState<string>('');
@@ -132,15 +136,24 @@ export const MonolithicView: React.FC<MonolithicViewProps> = ({
       const override = all[activeAgent.id];
       if (override) {
         setIsMonoCustomized(true);
+        setMonoName(override.name !== undefined ? override.name : activeAgent.name);
+        setMonoWorkspace(override.customWorkspaceName !== undefined ? override.customWorkspaceName : activeAgent.id);
+        setMonoRole(override.role !== undefined ? override.role : activeAgent.role);
         setMonoTone(override.tone !== undefined ? override.tone : activeAgent.meta.tone);
         setMonoConstraints(override.constraints !== undefined ? [...override.constraints] : [...activeAgent.meta.constraints]);
       } else {
         setIsMonoCustomized(false);
+        setMonoName(activeAgent.name);
+        setMonoWorkspace(activeAgent.id);
+        setMonoRole(activeAgent.role);
         setMonoTone(activeAgent.meta.tone);
         setMonoConstraints([...activeAgent.meta.constraints]);
       }
     } catch {
       setIsMonoCustomized(false);
+      setMonoName(activeAgent.name);
+      setMonoWorkspace(activeAgent.id);
+      setMonoRole(activeAgent.role);
       setMonoTone(activeAgent.meta.tone);
       setMonoConstraints([...activeAgent.meta.constraints]);
     }
@@ -150,15 +163,25 @@ export const MonolithicView: React.FC<MonolithicViewProps> = ({
     try {
       const raw = localStorage.getItem('mythos_agent_overrides');
       const all = raw ? JSON.parse(raw) : {};
+      const cleanedName = monoName.trim();
+      const cleanedWorkspace = monoWorkspace.trim().toUpperCase();
+      const cleanedRole = monoRole.trim();
       const cleanedTone = monoTone.trim();
       const cleanedConstraints = monoConstraints.map((c) => c.trim()).filter(Boolean);
       all[activeAgent.id] = {
+        name: cleanedName || activeAgent.name,
+        handle: cleanedName ? cleanedName.split(/\s+/)[0] : activeAgent.handle,
+        role: cleanedRole || activeAgent.role,
+        customWorkspaceName: cleanedWorkspace || activeAgent.id,
         tone: cleanedTone || activeAgent.meta.tone,
         constraints: cleanedConstraints,
       };
       localStorage.setItem('mythos_agent_overrides', JSON.stringify(all));
       setIsMonoCustomized(true);
-      addLog(`Saved dossier customization for ${activeAgent.handle} (Port ${activeAgent.port})`, 'SYS', 'ok');
+      if (cleanedName) {
+        setAgentHandle(cleanedName.split(/\s+/)[0]);
+      }
+      addLog(`Saved dossier customization for ${cleanedName || activeAgent.handle} (Port ${activeAgent.port})`, 'SYS', 'ok');
     } catch (err: any) {
       addLog(`Failed to save dossier: ${err.message || err}`, 'SYS', 'err');
     }
@@ -171,8 +194,12 @@ export const MonolithicView: React.FC<MonolithicViewProps> = ({
       delete all[activeAgent.id];
       localStorage.setItem('mythos_agent_overrides', JSON.stringify(all));
       setIsMonoCustomized(false);
+      setMonoName(activeAgent.name);
+      setMonoWorkspace(activeAgent.id);
+      setMonoRole(activeAgent.role);
       setMonoTone(activeAgent.meta.tone);
       setMonoConstraints([...activeAgent.meta.constraints]);
+      setAgentHandle(activeAgent.handle);
       addLog(`Reset dossier for ${activeAgent.handle} to canonical defaults`, 'SYS', 'ok');
     } catch (err: any) {
       addLog(`Failed to reset dossier: ${err.message || err}`, 'SYS', 'err');
@@ -194,7 +221,11 @@ export const MonolithicView: React.FC<MonolithicViewProps> = ({
   const [showEmbeddingModel, setShowEmbeddingModel] = useState<boolean>(false);
   const [showOperations, setShowOperations] = useState<boolean>(true);
   const [isParametersLocked, setIsParametersLocked] = useState<boolean>(false);
-  const [embeddingModel] = useState<string>('gemini-embedding-2');
+  const [embeddingModel, setEmbeddingModel] = useState<string>(PINNED_MODEL);
+  const [availableEmbeddingModels, setAvailableEmbeddingModels] = useState<string[]>([
+    ...SUPPORTED_EMBEDDING_MODELS,
+  ]);
+  const [fetchingEmbeddingModels, setFetchingEmbeddingModels] = useState<boolean>(false);
   const [batchSize, setBatchSize] = useState<number>(40);
   const [lanesPerKey, setLanesPerKey] = useState<number>(2);
   const [chunkSize, setChunkSize] = useState<number>(2000);
@@ -348,6 +379,32 @@ export const MonolithicView: React.FC<MonolithicViewProps> = ({
     }
   };
 
+  const handleFetchEmbeddingModels = async () => {
+    if (!provider || !provider.fetchEmbeddingModels) {
+      addLog('ERR: Embedding model fetcher unavailable on provider', 'SYS', 'err');
+      return;
+    }
+    setFetchingEmbeddingModels(true);
+    addLog('Fetching available embedding models from Google AI...', 'SYS', 'sys');
+    try {
+      const models = await provider.fetchEmbeddingModels();
+      if (models && models.length > 0) {
+        setAvailableEmbeddingModels(models);
+        if (!models.includes(embeddingModel)) {
+          setEmbeddingModel(models[0]);
+        }
+        addLog(`Successfully retrieved ${models.length} embedding models.`, 'SYS', 'ok');
+      } else {
+        addLog('No embedding models found, using supported defaults.', 'SYS', 'sys');
+      }
+    } catch (err: any) {
+      addLog(`Failed to fetch embedding models: ${err.message}`, 'SYS', 'err');
+      setAvailableEmbeddingModels([...SUPPORTED_EMBEDDING_MODELS]);
+    } finally {
+      setFetchingEmbeddingModels(false);
+    }
+  };
+
   // Lock parameters handler
   const handleLockParameters = () => {
     // Sync keys
@@ -390,8 +447,16 @@ export const MonolithicView: React.FC<MonolithicViewProps> = ({
       return;
     }
 
+    // Pre-flight model family compatibility check
+    const compat = validateModelCompatibility(generationModel, embeddingModel);
+    if (!compat.compatible) {
+      addLog(`MINT REFUSED: ${compat.reason}`, 'KERNEL', 'err');
+      alert(`Model Configuration Conflict:\n\n${compat.reason}`);
+      return;
+    }
+
     if (stagedFiles.length === 0) {
-      addLog('No staged files. Generating synthetic default locus lore payload...', 'SYS', 'sys');
+      addLog(`No staged files. Generating synthetic default locus lore payload using ${embeddingModel}...`, 'SYS', 'sys');
       setIsProcessing(true);
       setRuntimeState('INGESTING');
       setProgress(15);
@@ -407,6 +472,7 @@ export const MonolithicView: React.FC<MonolithicViewProps> = ({
         }));
         const result = await factory.ingestBatches(batches, {
           agentId: activeAgent.id,
+          embeddingModel,
           onProgress: (p) => {
             setProgress(40 + Math.round((p.processed / Math.max(1, batches.length)) * 50));
           },
@@ -445,6 +511,7 @@ export const MonolithicView: React.FC<MonolithicViewProps> = ({
         const batches = chunks.map((text) => ({ text, source: file.name }));
         const result = await factory.ingestBatches(batches, {
           agentId: activeAgent.id,
+          embeddingModel,
         });
 
         totalCreated += result.ingested;
@@ -507,8 +574,16 @@ export const MonolithicView: React.FC<MonolithicViewProps> = ({
     }
 
     addLog(`Exporting Lorepack archive for agent ${activeAgent.id}...`, 'SYS', 'sys');
+    setIsProcessing(true);
+    setRuntimeState('PROCESSING');
+    setProgress(5);
     try {
-      const { blob, count, filename } = await factory.exportToGz(activeAgent.id);
+      const { blob, count, filename } = await factory.exportToGz(activeAgent.id, (p) => {
+        setProgress(p.percent);
+        if (p.serialized % 10 === 0 || p.stage === 'compressing' || p.stage === 'complete') {
+          addLog(`Export progress: ${p.percent}% (${p.serialized}/${p.total} records) — ${p.chunkLabel || p.stage}`, 'SYS', 'sys');
+        }
+      });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
@@ -517,9 +592,14 @@ export const MonolithicView: React.FC<MonolithicViewProps> = ({
       a.click();
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
+      setProgress(100);
+      setRuntimeState('IDLE');
       addLog(`Lorepack archive downloaded successfully (${Math.round(blob.size / 1024)} KB, ${count} records, gzip compressed).`, 'KERNEL', 'ok');
     } catch (err: any) {
       addLog(`Export failed: ${err.message}`, 'KERNEL', 'err');
+      setRuntimeState('ERROR');
+    } finally {
+      setIsProcessing(false);
     }
   };
 
@@ -721,6 +801,41 @@ ${stagedFiles.map(f => `FILE: ${f.name}\nCONTENT:\n${f.text}`).join('\n\n')}`;
 
                   {showDossierEditor && (
                     <div className="flex flex-col gap-2 pt-1 border-t border-[#222222]">
+                      {/* Agent Name & Workspace Locus Customization */}
+                      <div className="grid grid-cols-2 gap-2">
+                        <div className="flex flex-col gap-0.5">
+                          <label className="text-[9px] uppercase tracking-wider text-[#777777]">Agent Name:</label>
+                          <input
+                            type="text"
+                            value={monoName}
+                            onChange={(e) => setMonoName(e.target.value)}
+                            placeholder="e.g. Maya"
+                            className="w-full bg-[#1a1a1a] border border-[#333333] text-[#e0e0e0] px-2 py-1 text-[10px] font-mono focus:border-[#ff3300] outline-none"
+                          />
+                        </div>
+                        <div className="flex flex-col gap-0.5">
+                          <label className="text-[9px] uppercase tracking-wider text-[#777777]">Workspace Locus:</label>
+                          <input
+                            type="text"
+                            value={monoWorkspace}
+                            onChange={(e) => setMonoWorkspace(e.target.value.toUpperCase())}
+                            placeholder="e.g. MAYA"
+                            className="w-full bg-[#1a1a1a] border border-[#333333] text-[#e0e0e0] px-2 py-1 text-[10px] font-mono focus:border-[#ff3300] outline-none uppercase"
+                          />
+                        </div>
+                      </div>
+
+                      {/* Agent Role / Title */}
+                      <div className="flex flex-col gap-0.5">
+                        <label className="text-[9px] uppercase tracking-wider text-[#777777]">Agent Role / Title:</label>
+                        <input
+                          type="text"
+                          value={monoRole}
+                          onChange={(e) => setMonoRole(e.target.value)}
+                          placeholder="e.g. Agent of Illusion, Simulation, and Perceptual Reality"
+                          className="w-full bg-[#1a1a1a] border border-[#333333] text-[#e0e0e0] px-2 py-1 text-[10px] font-mono focus:border-[#ff3300] outline-none"
+                        />
+                      </div>
                       {/* Persona Preset Quick Selector */}
                       <div className="flex flex-col gap-1">
                         <label className="text-[9px] uppercase tracking-wider text-[#777777] flex items-center justify-between">
@@ -1019,16 +1134,69 @@ ${stagedFiles.map(f => `FILE: ${f.name}\nCONTENT:\n${f.text}`).join('\n\n')}`;
 
           {/* Embedding Model & Hyperparameters Collapsible */}
           <div className="border border-[#2a2a2a] bg-[#161616] p-2.5 flex flex-col gap-2 rounded-none">
-            <label
-              onClick={() => setShowEmbeddingModel(!showEmbeddingModel)}
-              className="text-[11px] uppercase tracking-wider text-[#8a8a8a] cursor-pointer flex justify-between select-none hover:text-white"
-            >
-              <span>[{showEmbeddingModel ? '−' : '+'}] EMBEDDING MODEL</span>
-              <span className="text-white font-mono text-[10px]">{embeddingModel}</span>
-            </label>
+            <div className="flex justify-between items-center">
+              <label
+                onClick={() => setShowEmbeddingModel(!showEmbeddingModel)}
+                className="text-[11px] uppercase tracking-wider text-[#8a8a8a] cursor-pointer flex-1 flex justify-between select-none hover:text-white mr-2"
+              >
+                <span>[{showEmbeddingModel ? '−' : '+'}] EMBEDDING MODEL</span>
+                <span className="text-white font-mono text-[10px] truncate max-w-[140px]">{embeddingModel}</span>
+              </label>
+              <button
+                type="button"
+                onClick={handleFetchEmbeddingModels}
+                disabled={fetchingEmbeddingModels}
+                className="text-[9px] uppercase tracking-wider text-[#4a90e2] hover:text-white cursor-pointer disabled:opacity-50 shrink-0"
+              >
+                {fetchingEmbeddingModels ? 'FETCHING...' : 'FETCH EMBEDDING MODELS'}
+              </button>
+            </div>
             {showEmbeddingModel && (
               <div className="pt-2 border-t border-[#2a2a2a] flex flex-col gap-2">
-                <div className="grid grid-cols-2 gap-2 text-xs">
+                <div>
+                  <label className="text-[10px] text-[#8a8a8a] block mb-1">SELECT EMBEDDING MODEL</label>
+                  <select
+                    id="embeddingModelSelect"
+                    value={embeddingModel}
+                    onChange={(e) => {
+                      const newModel = e.target.value;
+                      setEmbeddingModel(newModel);
+                      if (provider && typeof provider.setEmbeddingModel === 'function') {
+                        provider.setEmbeddingModel(newModel);
+                      }
+                      setIsParametersLocked(false);
+                      addLog(`Active embedding model switched to: ${newModel}`, 'SYS', 'sys');
+                    }}
+                    className="w-full bg-[#1f1f1f] border border-[#3a3a3a] text-[#e6e6e6] px-2.5 py-1.5 text-xs focus:border-[#ff3300] outline-none rounded-none cursor-pointer font-mono"
+                  >
+                    {availableEmbeddingModels.map((m) => (
+                      <option key={m} value={m}>
+                        {m}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Compatibility Guard Badge */}
+                {(() => {
+                  const compat = validateModelCompatibility(generationModel, embeddingModel);
+                  if (!compat.compatible) {
+                    return (
+                      <div className="bg-[#2a0e14] border border-[#ff3366]/50 p-2 text-[10px] text-[#ff9ab3] font-mono flex flex-col gap-1">
+                        <span className="font-bold uppercase tracking-wider text-[#ff3366]">⚠️ MODEL FAMILY CONFLICT</span>
+                        <span>{compat.reason}</span>
+                      </div>
+                    );
+                  }
+                  return (
+                    <div className="bg-[#0f1f14] border border-[#00ff41]/30 p-1.5 text-[9px] text-[#a3e635] font-mono flex items-center justify-between">
+                      <span className="uppercase tracking-wider">✓ MODEL PAIRING COMPATIBLE</span>
+                      <span className="text-[#8a8a8a]">{generationModel} ↔ {embeddingModel}</span>
+                    </div>
+                  );
+                })()}
+
+                <div className="grid grid-cols-2 gap-2 text-xs pt-1">
                   <div>
                     <label className="text-[10px] text-[#8a8a8a] block mb-1">BATCH SIZE</label>
                     <input
@@ -1162,15 +1330,21 @@ ${stagedFiles.map(f => `FILE: ${f.name}\nCONTENT:\n${f.text}`).join('\n\n')}`;
                 )}
 
                 {/* Ingest Lore */}
-                <button
-                  id="ingestBtn"
-                  type="button"
-                  disabled={isProcessing}
-                  onClick={handleIngestLore}
-                  className="w-full bg-[#1c1c1c] hover:bg-[#222] border border-[#3a3a3a] hover:border-[#ff3300] text-[#e6e6e6] disabled:opacity-40 py-2 px-3 text-xs font-black uppercase tracking-wider transition-colors cursor-pointer rounded-none text-center"
-                >
-                  {isProcessing ? 'INGESTING...' : 'INGEST LORE'}
-                </button>
+                {(() => {
+                  const compat = validateModelCompatibility(generationModel, embeddingModel);
+                  return (
+                    <button
+                      id="ingestBtn"
+                      type="button"
+                      disabled={isProcessing || !compat.compatible}
+                      onClick={handleIngestLore}
+                      title={!compat.compatible ? compat.reason : 'Ingest staged lore files'}
+                      className="w-full bg-[#1c1c1c] hover:bg-[#222] border border-[#3a3a3a] hover:border-[#ff3300] text-[#e6e6e6] disabled:opacity-40 py-2 px-3 text-xs font-black uppercase tracking-wider transition-colors cursor-pointer rounded-none text-center"
+                    >
+                      {isProcessing ? 'INGESTING...' : !compat.compatible ? 'INGEST BLOCKED (MODEL CONFLICT)' : 'INGEST LORE'}
+                    </button>
+                  );
+                })()}
 
                 {/* Build Graph Lite */}
                 <button
