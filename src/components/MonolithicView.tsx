@@ -549,10 +549,33 @@ export const MonolithicView: React.FC<MonolithicViewProps> = ({
 
     setIsProcessing(true);
     setRuntimeState('PROCESSING');
-    setProgress(20);
-    addLog(`Starting Graph Lite synthesis for agent ${activeAgent.id}...`, 'KERNEL', 'sys');
+    setProgress(5);
 
     try {
+      const allNodes = store ? await store.getVectorsByAgent(activeAgent.id) : [];
+      if (allNodes.length === 0) {
+        addLog(`Aborted: Agent ${activeAgent.id} has 0 vector nodes in vault. Ingest text first.`, 'KERNEL', 'err');
+        return;
+      }
+
+      const unprocessed = store && typeof store.getUnprocessedVectorsByAgent === 'function'
+        ? await store.getUnprocessedVectorsByAgent(activeAgent.id)
+        : allNodes.filter((n) => n.processing_status !== 'completed');
+
+      const alreadyCompleted = allNodes.length - unprocessed.length;
+
+      if (unprocessed.length === 0) {
+        addLog(`Graph already fully synthesized for agent ${activeAgent.id} (${allNodes.length}/${allNodes.length} nodes linked).`, 'KERNEL', 'ok');
+        setProgress(100);
+        return;
+      }
+
+      if (alreadyCompleted > 0) {
+        addLog(`Resuming Graph Lite from checkpoint: ${alreadyCompleted}/${allNodes.length} nodes already completed, synthesizing ${unprocessed.length} remaining...`, 'KERNEL', 'sys');
+      } else {
+        addLog(`Starting Graph Lite synthesis for agent ${activeAgent.id} (${unprocessed.length} nodes)...`, 'KERNEL', 'sys');
+      }
+
       const createdEdges = await factory.buildGraphLite(
         activeAgent.id,
         (curr: number, tot: number, created: number) => {
@@ -563,7 +586,7 @@ export const MonolithicView: React.FC<MonolithicViewProps> = ({
       );
 
       setProgress(100);
-      addLog(`Graph Lite synthesis complete: ${createdEdges} triplet edges created.`, 'KERNEL', 'ok');
+      addLog(`Graph Lite synthesis complete: +${createdEdges} triplet edges created.`, 'KERNEL', 'ok');
       await refreshStats();
       setRuntimeState('IDLE');
     } catch (err: any) {
