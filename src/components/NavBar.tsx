@@ -10,10 +10,12 @@ import {
   Share2,
   Sparkles,
   Files,
+  Workflow,
 } from 'lucide-react';
 
 export type AppSectionTab =
   | 'monolithic'
+  | 'pipeline'
   | 'workspace'
   | 'ingest'
   | 'bulk'
@@ -30,6 +32,7 @@ interface NavBarProps {
   stats: { totalNodes: number; totalEdges: number };
   activeAgentId: string;
   pendingBulkCount?: number;
+  pipelineRunning?: boolean;
 }
 
 export const NavBar: React.FC<NavBarProps> = ({
@@ -38,6 +41,7 @@ export const NavBar: React.FC<NavBarProps> = ({
   stats,
   activeAgentId,
   pendingBulkCount,
+  pipelineRunning,
 }) => {
   const tabs: {
     id: AppSectionTab;
@@ -55,6 +59,14 @@ export const NavBar: React.FC<NavBarProps> = ({
       icon: <Terminal className="w-3.5 h-3.5 text-[#ff3300]" />,
       highlight: true,
       tag: 'CLASSIC',
+    },
+    {
+      id: 'pipeline',
+      label: 'Pipeline Flow',
+      shortLabel: 'Pipeline Flow',
+      icon: <Workflow className={`w-3.5 h-3.5 ${pipelineRunning ? 'text-[#00ff41] animate-pulse' : 'text-[#00ff41]'}`} />,
+      highlight: true,
+      tag: pipelineRunning ? 'RUNNING' : 'AUTO-SHIP',
     },
     {
       id: 'workspace',

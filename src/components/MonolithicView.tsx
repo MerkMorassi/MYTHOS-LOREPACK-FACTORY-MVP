@@ -598,6 +598,171 @@ export const MonolithicView: React.FC<MonolithicViewProps> = ({
     }
   };
 
+  // Automated Pipeline Runner: INGEST -> GRAPH -> EXPORT -> NUKE -> REIMPORT -> QUERY TEST -> SHIP
+  const handleAutoShipPipeline = async () => {
+    if (!factory || !store) {
+      addLog('ERR: Factory or Vault store not initialized', 'SYS', 'err');
+      return;
+    }
+
+    const compat = validateModelCompatibility(generationModel, embeddingModel);
+    if (!compat.compatible) {
+      addLog(`PIPELINE REFUSED: ${compat.reason}`, 'KERNEL', 'err');
+      alert(`Model Configuration Conflict:\n\n${compat.reason}`);
+      return;
+    }
+
+    setIsProcessing(true);
+    setRuntimeState('PROCESSING');
+    setProgress(5);
+    addLog(`=== [AUTO-SHIP PIPELINE]: INITIATING FOR AGENT ${activeAgent.id} ===`, 'KERNEL', 'sys');
+
+    try {
+      // ----------------------------------------------------
+      // STEP 1: INGEST ALL STAGED FILES (Document-by-Document)
+      // ----------------------------------------------------
+      if (stagedFiles.length > 0) {
+        addLog(`[PIPELINE STEP 1/5]: Ingesting ${stagedFiles.length} staged file(s)...`, 'SYS', 'sys');
+        const initialTotal = stagedFiles.length;
+        let filesProcessed = 0;
+
+        while (stagedFiles.length > 0) {
+          const file = stagedFiles[0];
+          filesProcessed++;
+          addLog(`[PIPELINE]: Ingesting document [${filesProcessed}/${initialTotal}]: ${file.name}...`, 'SYS', 'sys');
+          
+          const chunks = factory.chunk(file.text, chunkSize);
+          const batches = chunks.map((text) => ({ text, source: file.name }));
+          const result = await factory.ingestBatches(batches, {
+            agentId: activeAgent.id,
+            embeddingModel,
+          });
+
+          setStagedFiles((prev) => prev.slice(1));
+          await refreshStats();
+          setProgress(5 + Math.round((filesProcessed / Math.max(1, initialTotal)) * 25));
+          addLog(`[PIPELINE]: Ingested "${file.name}" (+${result.ingested} records).`, 'KERNEL', 'ok');
+        }
+      } else {
+        addLog(`[PIPELINE STEP 1/5]: No new staged files; proceeding with existing vault records.`, 'SYS', 'sys');
+        setProgress(30);
+      }
+
+      // ----------------------------------------------------
+      // STEP 2: GRAPH SYNTHESIS (Unprocessed Records Delta)
+      // ----------------------------------------------------
+      addLog(`[PIPELINE STEP 2/5]: Synthesizing Semantic Graph Lite relationships...`, 'SYS', 'sys');
+      const allNodes = await store.getVectorsByAgent(activeAgent.id);
+      if (allNodes.length === 0) {
+        throw new Error(`Pipeline halted: Agent ${activeAgent.id} has 0 vector nodes to graph.`);
+      }
+
+      const unprocessed = typeof store.getUnprocessedVectorsByAgent === 'function'
+        ? await store.getUnprocessedVectorsByAgent(activeAgent.id)
+        : allNodes.filter((n) => n.processing_status !== 'completed');
+
+      if (unprocessed.length > 0) {
+        addLog(`[PIPELINE]: Synthesizing ${unprocessed.length} pending node(s)...`, 'KERNEL', 'sys');
+        const createdEdges = await factory.buildGraphLite(
+          activeAgent.id,
+          (curr, tot, created) => {
+            setProgress(30 + Math.round((curr / Math.max(1, tot)) * 30));
+            if (curr % 5 === 0 || curr === tot) {
+              addLog(`[PIPELINE GRAPH]: [${curr}/${tot}] nodes linked (+${created} edges)`, 'SYS', 'sys');
+            }
+          },
+          generationModel
+        );
+        addLog(`[PIPELINE]: Graph synthesis completed: +${createdEdges} edges.`, 'KERNEL', 'ok');
+      } else {
+        addLog(`[PIPELINE]: All ${allNodes.length} nodes are already graphed. Skipping redundant LLM calls.`, 'KERNEL', 'ok');
+      }
+      await refreshStats();
+      setProgress(60);
+
+      // ----------------------------------------------------
+      // STEP 3: EXPORT CANONICAL .JSONL.GZ ARCHIVE
+      // ----------------------------------------------------
+      addLog(`[PIPELINE STEP 3/5]: Exporting canonical GZIP archive...`, 'SYS', 'sys');
+      const { blob: exportBlob, count: exportedCount, filename: exportFilename } = await factory.exportToGz(
+        activeAgent.id,
+        (p) => {
+          setProgress(60 + Math.round((p.percent / 100) * 15));
+        }
+      );
+
+      // Trigger user download of the verified artifact
+      const downloadUrl = URL.createObjectURL(exportBlob);
+      const downloadLink = document.createElement('a');
+      downloadLink.href = downloadUrl;
+      downloadLink.download = exportFilename;
+      document.body.appendChild(downloadLink);
+      downloadLink.click();
+      document.body.removeChild(downloadLink);
+      URL.revokeObjectURL(downloadUrl);
+
+      addLog(`[PIPELINE]: Archive exported & downloaded: ${exportFilename} (${Math.round(exportBlob.size / 1024)} KB, ${exportedCount} records)`, 'KERNEL', 'ok');
+      setProgress(75);
+
+      // ----------------------------------------------------
+      // STEP 4: CLEANROOM TEST (NUKE AGENT & RE-IMPORT ARCHIVE)
+      // ----------------------------------------------------
+      addLog(`[PIPELINE STEP 4/5]: Running Air-Gap Cleanroom test (Nuke agent space & re-import archive)...`, 'SYS', 'sys');
+      const cleared = await factory.clearAgent(activeAgent.id);
+      addLog(`[PIPELINE CLEANROOM]: Wiped agent store (purged ${cleared.vectors} vectors, ${cleared.edges} edges).`, 'SYS', 'sys');
+      await refreshStats();
+
+      // Re-import from the exported memory Blob
+      addLog(`[PIPELINE CLEANROOM]: Re-importing archive into clean vault space...`, 'SYS', 'sys');
+      const importResult = await factory.importLorepack(exportBlob, activeAgent.id);
+
+      if (importResult.importedVectors === 0) {
+        throw new Error('Cleanroom test failed: Re-imported archive resulted in 0 vectors.');
+      }
+
+      addLog(`[PIPELINE CLEANROOM]: Integrity verified! Successfully re-imported ${importResult.importedVectors} vectors, ${importResult.importedEdges} edges.`, 'KERNEL', 'ok');
+      await refreshStats();
+      setProgress(90);
+
+      // ----------------------------------------------------
+      // STEP 5: GOLDEN QUERY VERIFICATION
+      // ----------------------------------------------------
+      addLog(`[PIPELINE STEP 5/5]: Running Golden Verification Query...`, 'SYS', 'sys');
+      const testQueries = [
+        activeAgent.name,
+        activeAgent.handle,
+        activeAgent.role,
+      ];
+      
+      let verifiedQueries = 0;
+      for (const query of testQueries) {
+        const results = await factory.search(query, activeAgent.id, 3, 0.2);
+        if (results && results.length > 0) {
+          verifiedQueries++;
+          addLog(`[GOLDEN QUERY]: Query "${query}" matched ${results.length} node(s) (top similarity: ${(results[0].score * 100).toFixed(1)}%).`, 'KERNEL', 'ok');
+        } else {
+          addLog(`[GOLDEN QUERY]: Query "${query}" yielded 0 matches.`, 'SYS', 'sys');
+        }
+      }
+
+      if (verifiedQueries === 0) {
+        throw new Error('Golden query test failed: 0 search matches found on verified archive.');
+      }
+
+      setProgress(100);
+      setRuntimeState('IDLE');
+      addLog(`=== [AUTO-SHIP PIPELINE]: CERTIFIED & COMPLETE! Lorepack ready for release. ===`, 'KERNEL', 'ok');
+      alert(`[AUTO-SHIP PIPELINE COMPLETE]\n\nAgent: ${activeAgent.name} (${activeAgent.id})\nArchive: ${exportFilename}\nStatus: CERTIFIED (Exported -> Nuked -> Re-imported -> Verified)`);
+    } catch (pipelineErr: any) {
+      addLog(`[AUTO-SHIP PIPELINE FAILURE]: ${pipelineErr.message || pipelineErr}`, 'KERNEL', 'err');
+      setRuntimeState('ERROR');
+      alert(`Auto-Ship Pipeline Failed:\n\n${pipelineErr.message || pipelineErr}`);
+    } finally {
+      setIsProcessing(false);
+      setTimeout(() => setProgress(0), 1200);
+    }
+  };
+
   // Export GZIP (Canonical compressed export)
   const handleExportGzip = async () => {
     if (!factory) {
@@ -1360,6 +1525,19 @@ ${stagedFiles.map(f => `FILE: ${f.name}\nCONTENT:\n${f.text}`).join('\n\n')}`;
                     </button>
                   </div>
                 )}
+
+                {/* Auto-Ship Full Pipeline (Ingest -> Graph -> Export -> Nuke -> Re-import -> Verify) */}
+                <button
+                  id="autoShipBtn"
+                  type="button"
+                  disabled={isProcessing}
+                  onClick={handleAutoShipPipeline}
+                  title="Run end-to-end automated pipeline: Ingest -> Graph -> Export GZIP -> Cleanroom Nuke -> Re-import -> Golden Query Test"
+                  className="w-full bg-[#1c1c1c] hover:bg-[#252525] border-2 border-[#00ff41] hover:border-[#00ff66] text-[#00ff41] py-2 px-3 text-xs font-black uppercase tracking-wider transition-colors cursor-pointer rounded-none flex items-center justify-center gap-2 text-center shadow-[0_0_12px_rgba(0,255,65,0.15)] disabled:opacity-40"
+                >
+                  <Sparkles className="w-3.5 h-3.5 text-[#00ff41]" />
+                  <span>{isProcessing ? 'PIPELINE RUNNING...' : 'AUTO-SHIP PIPELINE (1-CLICK)'}</span>
+                </button>
 
                 {/* Ingest Lore */}
                 {(() => {

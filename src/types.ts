@@ -61,12 +61,33 @@ export interface ImportProgress {
   rejected?: number;
 }
 
-export interface ExportProgress {
-  serialized: number;
-  total: number;
-  stage: 'serializing' | 'compressing' | 'complete';
-  percent: number;
-  chunkLabel?: string;
+export type PipelineStepId = 'stage' | 'ingest' | 'graph' | 'test' | 'ship';
+export type PipelineStepStatus = 'idle' | 'running' | 'completed' | 'error' | 'skipped';
+
+export interface PipelineStepInfo {
+  id: PipelineStepId;
+  label: string;
+  sublabel: string;
+  status: PipelineStepStatus;
+  progress: number; // 0 - 100
+  detail?: string;
+  error?: string;
+  startedAt?: number;
+  completedAt?: number;
 }
+
+export interface PipelineState {
+  agentId: string;
+  active: boolean;
+  currentStepId: PipelineStepId | null;
+  lastFailedStepId: PipelineStepId | null;
+  lastCompletedStepId: PipelineStepId | null;
+  overallProgress: number;
+  steps: Record<PipelineStepId, PipelineStepInfo>;
+  logs: Array<{ time: string; msg: string; type: 'info' | 'ok' | 'err' }>;
+  exportedBlob?: Blob;
+  exportedFilename?: string;
+}
+
 
 
