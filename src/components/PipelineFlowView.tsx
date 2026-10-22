@@ -32,6 +32,7 @@ interface PipelineFlowViewProps {
   onRunFullPipeline: () => void;
   onResumeFromStep: (stepId: PipelineStepId) => void;
   onSelectTab: (tabId: any) => void;
+  processingStrategy: 'fast' | 'bulk';
 }
 
 export const PipelineFlowView: React.FC<PipelineFlowViewProps> = ({
@@ -43,6 +44,7 @@ export const PipelineFlowView: React.FC<PipelineFlowViewProps> = ({
   onRunFullPipeline,
   onResumeFromStep,
   onSelectTab,
+  processingStrategy,
 }) => {
   const stepsOrder: PipelineStepId[] = ['stage', 'ingest', 'graph', 'test', 'ship'];
 
@@ -138,6 +140,11 @@ export const PipelineFlowView: React.FC<PipelineFlowViewProps> = ({
             </span>
             <span className="text-xs text-neutral-400 font-mono">
               TARGET: <span className="text-white font-bold">{activeAgent.name}</span> ({activeAgent.id})
+            </span>
+            <span className={`px-1.5 py-0.5 border font-mono text-[10px] font-bold uppercase tracking-wider rounded ${
+              processingStrategy === 'fast' ? 'bg-[#ffaa00]/20 border-[#ffaa00]/40 text-[#ffaa00]' : 'bg-sky-500/20 border-sky-500/40 text-sky-400'
+            }`}>
+              MODE: {processingStrategy === 'fast' ? 'Fast Build' : 'Bulk Batch'}
             </span>
           </div>
           <h1 className="text-lg sm:text-xl font-black uppercase tracking-wider text-white flex items-center gap-2">

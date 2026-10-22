@@ -54,6 +54,16 @@ export interface LorepackStore {
   nukeStore(): Promise<void>;
 }
 
+export interface ExportProgress {
+  active?: boolean;
+  serialized: number;
+  total: number;
+  percent: number;
+  stage: 'initializing' | 'serializing' | 'compressing' | 'complete';
+  chunkLabel?: string;
+  filename?: string;
+}
+
 export interface ImportProgress {
   processed: number;
   vectors: number;
