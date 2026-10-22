@@ -8,6 +8,7 @@ export interface VectorRecord {
   numMarkId?: string;
   source: string;
   timestamp: number;
+  processing_status?: 'pending' | 'processing' | 'completed' | 'error';
   metadata?: Record<string, unknown>;
   permissions?: unknown;
 }
@@ -42,10 +43,13 @@ export interface LorepackStore {
   addVectors(vectors: VectorRecord[]): Promise<void>;
   getVectorsByAgent(agentId: string): Promise<VectorRecord[]>;
   getAllVectors(): Promise<VectorRecord[]>;
+  getUnprocessedVectorsByAgent?(agentId: string): Promise<VectorRecord[]>;
+  updateVectorProcessingStatus?(ids: string[], status: 'pending' | 'processing' | 'completed' | 'error'): Promise<void>;
   addTripletEdges(edges: TripletEdge[]): Promise<void>;
   getTripletEdgesByAgent(agentId: string): Promise<TripletEdge[]>;
   getAllTripletEdges(): Promise<TripletEdge[]>;
   addRecordsAtomic(vectors: VectorRecord[], edges: TripletEdge[]): Promise<void>;
+  searchVectorsBySimilarity(queryVector: number[], limit: number): Promise<VectorRecord[]>;
   clearAgent(agentId: string): Promise<{ vectors: number; edges: number }>;
   nukeStore(): Promise<void>;
 }

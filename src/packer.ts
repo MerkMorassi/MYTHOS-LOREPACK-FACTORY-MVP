@@ -443,19 +443,19 @@ export class LorepackPacker {
     onProgress?: (current: number, total: number, created: number) => void,
     modelName = 'gemini-3.6-flash'
   ): Promise<number> {
-    const nodes = await this.store.getVectorsByAgent(agentId);
+    const allNodes = await this.store.getVectorsByAgent(agentId);
 
-    if (nodes.length === 0) {
+    if (allNodes.length === 0) {
       return 0;
     }
 
-    const invalidNodes = nodes.filter((node) => !isValidVector(node.vector));
+    const invalidNodes = allNodes.filter((node) => !isValidVector(node.vector));
     if (invalidNodes.length > 0) {
       throw new Error(`Graph integrity failure: ${invalidNodes.length} invalid vector node(s) found.`);
     }
 
     const dimCounts = new Map<number, number>();
-    for (const n of nodes) {
+    for (const n of allNodes) {
       const d = n.vector.length;
       dimCounts.set(d, (dimCounts.get(d) || 0) + 1);
     }
@@ -466,38 +466,73 @@ export class LorepackPacker {
       throw new Error(`Graph integrity failure: agent contains multiple vector dimensions (${breakdown}). Purge agent records or re-index to homogenize vector space.`);
     }
 
+    // Query un-processed nodes to resume exactly where it failed without re-scanning completed nodes
+    const uncompletedNodes = typeof this.store.getUnprocessedVectorsByAgent === 'function'
+      ? await this.store.getUnprocessedVectorsByAgent(agentId)
+      : allNodes.filter((n) => n.processing_status !== 'completed');
+
+    if (uncompletedNodes.length === 0) {
+      onProgress?.(allNodes.length, allNodes.length, 0);
+      return 0;
+    }
+
     const batchSize = 5;
     let created = 0;
-    for (let offset = 0; offset < nodes.length; offset += batchSize) {
-      const batch = nodes.slice(offset, offset + batchSize);
-      const counts = await Promise.all(
-        batch.map(async (node) => {
-          const triplets = await this.model.extractTripletsFromText(node.text, modelName);
-          if (!triplets.length) return 0;
-          
-          const edges: TripletEdge[] = await Promise.all(triplets.map(async (triplet) => {
-            const edgeFingerprint = await this.computeFingerprint(
-              `${agentId}:${node.id}:${triplet.s}:${triplet.r}:${triplet.o}`.toLowerCase()
-            );
+    let completedCount = allNodes.length - uncompletedNodes.length;
+
+    for (let offset = 0; offset < uncompletedNodes.length; offset += batchSize) {
+      const batch = uncompletedNodes.slice(offset, offset + batchSize);
+      
+      // Mark current batch as processing
+      if (typeof this.store.updateVectorProcessingStatus === 'function') {
+        await this.store.updateVectorProcessingStatus(batch.map(n => n.id), 'processing');
+      }
+
+      try {
+        const counts = await Promise.all(
+          batch.map(async (node) => {
+            const triplets = await this.model.extractTripletsFromText(node.text, modelName);
+            if (!triplets.length) {
+              if (typeof this.store.updateVectorProcessingStatus === 'function') {
+                await this.store.updateVectorProcessingStatus([node.id], 'completed');
+              }
+              return 0;
+            }
             
-            return {
-              id: `lp_edge_${edgeFingerprint}`,
-              type: 'edge',
-              agentId: agentId.toUpperCase(),
-              sourceId: node.id,
-              s: triplet.s,
-              r: triplet.r,
-              o: triplet.o,
-              timestamp: new Date().toISOString(),
-            };
-          }));
-          
-          await this.store.addRecordsAtomic([], edges);
-          return edges.length;
-        })
-      );
-      created += counts.reduce((total, count) => total + count, 0);
-      onProgress?.(Math.min(offset + batch.length, nodes.length), nodes.length, created);
+            const edges: TripletEdge[] = await Promise.all(triplets.map(async (triplet) => {
+              const edgeFingerprint = await this.computeFingerprint(
+                `${agentId}:${node.id}:${triplet.s}:${triplet.r}:${triplet.o}`.toLowerCase()
+              );
+              
+              return {
+                id: `lp_edge_${edgeFingerprint}`,
+                type: 'edge',
+                agentId: agentId.toUpperCase(),
+                sourceId: node.id,
+                s: triplet.s,
+                r: triplet.r,
+                o: triplet.o,
+                timestamp: new Date().toISOString(),
+              };
+            }));
+            
+            await this.store.addRecordsAtomic([], edges);
+            if (typeof this.store.updateVectorProcessingStatus === 'function') {
+              await this.store.updateVectorProcessingStatus([node.id], 'completed');
+            }
+            return edges.length;
+          })
+        );
+        created += counts.reduce((total, count) => total + count, 0);
+        completedCount += batch.length;
+        onProgress?.(completedCount, allNodes.length, created);
+      } catch (batchErr) {
+        // Flag failed batch as error
+        if (typeof this.store.updateVectorProcessingStatus === 'function') {
+          await this.store.updateVectorProcessingStatus(batch.map(n => n.id), 'error');
+        }
+        throw batchErr;
+      }
     }
     return created;
   }

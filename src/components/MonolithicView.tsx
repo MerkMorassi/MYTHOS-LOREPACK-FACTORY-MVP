@@ -503,9 +503,14 @@ export const MonolithicView: React.FC<MonolithicViewProps> = ({
 
     try {
       let totalCreated = 0;
-      for (let i = 0; i < stagedFiles.length; i++) {
-        const file = stagedFiles[i];
-        addLog(`Ingesting file [${i + 1}/${stagedFiles.length}]: ${file.name}...`, 'KERNEL', 'sys');
+      const initialTotal = stagedFiles.length;
+      let filesProcessed = 0;
+
+      // Ingest document-by-document: de-stage each document immediately upon completion
+      while (stagedFiles.length > 0) {
+        const file = stagedFiles[0];
+        filesProcessed++;
+        addLog(`Ingesting file [${filesProcessed}/${initialTotal}]: ${file.name}...`, 'KERNEL', 'sys');
         
         const chunks = factory.chunk(file.text, chunkSize);
         const batches = chunks.map((text) => ({ text, source: file.name }));
@@ -515,15 +520,19 @@ export const MonolithicView: React.FC<MonolithicViewProps> = ({
         });
 
         totalCreated += result.ingested;
-        setProgress(Math.round(((i + 1) / stagedFiles.length) * 100));
+
+        // Atomically de-stage the completed file so restarts only process remaining files
+        setStagedFiles((prev) => prev.slice(1));
+        await refreshStats();
+
+        setProgress(Math.round((filesProcessed / Math.max(1, initialTotal)) * 100));
+        addLog(`Successfully ingested "${file.name}" (+${result.ingested} records).`, 'KERNEL', 'ok');
       }
 
       addLog(`All staged files ingested! Total records stored: ${totalCreated}`, 'KERNEL', 'ok');
-      setStagedFiles([]);
-      await refreshStats();
       setRuntimeState('IDLE');
     } catch (err: any) {
-      addLog(`Ingest error: ${err.message}`, 'KERNEL', 'err');
+      addLog(`Ingest error on file "${stagedFiles[0]?.name || 'unknown'}": ${err.message}. Remaining ${stagedFiles.length} file(s) retained in stage.`, 'KERNEL', 'err');
       setRuntimeState('ERROR');
     } finally {
       setIsProcessing(false);

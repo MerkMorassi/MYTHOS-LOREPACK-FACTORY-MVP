@@ -107,6 +107,23 @@ export class InMemoryLorepackStore implements LorepackStore {
     return Array.from(this.vectors.values());
   }
 
+  async getUnprocessedVectorsByAgent(agentId: string): Promise<VectorRecord[]> {
+    const list = await this.getVectorsByAgent(agentId);
+    return list.filter((v) => v.processing_status !== 'completed');
+  }
+
+  async updateVectorProcessingStatus(
+    ids: string[],
+    status: 'pending' | 'processing' | 'completed' | 'error'
+  ): Promise<void> {
+    for (const id of ids) {
+      const existing = this.vectors.get(id);
+      if (existing) {
+        existing.processing_status = status;
+      }
+    }
+  }
+
   async addTripletEdges(edges: TripletEdge[]): Promise<void> {
     for (const e of edges) {
       this.edges.set(e.id, e);
@@ -155,6 +172,33 @@ export class InMemoryLorepackStore implements LorepackStore {
   async nukeStore(): Promise<void> {
     this.vectors.clear();
     this.edges.clear();
+  }
+
+  private cosineSimilarity(a: number[], b: number[]): number {
+    let dotProduct = 0;
+    let magnitudeA = 0;
+    let magnitudeB = 0;
+    for (let i = 0; i < a.length; i++) {
+      dotProduct += a[i] * b[i];
+      magnitudeA += a[i] * a[i];
+      magnitudeB += b[i] * b[i];
+    }
+    magnitudeA = Math.sqrt(magnitudeA);
+    magnitudeB = Math.sqrt(magnitudeB);
+    if (magnitudeA === 0 || magnitudeB === 0) return 0;
+    return dotProduct / (magnitudeA * magnitudeB);
+  }
+
+  async searchVectorsBySimilarity(queryVector: number[], limit: number): Promise<VectorRecord[]> {
+    const all = await this.getAllVectors();
+    return all
+      .map((v) => ({
+        vector: v,
+        similarity: this.cosineSimilarity(queryVector, v.vector),
+      }))
+      .sort((a, b) => b.similarity - a.similarity)
+      .slice(0, limit)
+      .map((item) => item.vector);
   }
 }
 

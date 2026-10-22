@@ -836,7 +836,23 @@ export default function App() {
         return;
       }
 
-      setGraphProgress({ current: 0, total: nodes.length, created: 0, active: true });
+      const unprocessedNodes = typeof store?.getUnprocessedVectorsByAgent === 'function'
+        ? await store.getUnprocessedVectorsByAgent(agentId)
+        : nodes.filter((n) => n.processing_status !== 'completed');
+
+      const alreadyCompleted = nodes.length - unprocessedNodes.length;
+
+      if (unprocessedNodes.length === 0) {
+        log(`[GRAPH]: All ${nodes.length} nodes are already completed. Semantic graph is fully synthesized.`);
+        setGraphProgress({ current: nodes.length, total: nodes.length, created: 0, active: false });
+        return;
+      }
+
+      if (alreadyCompleted > 0) {
+        log(`[GRAPH]: Resuming graph synthesis from checkpoint: ${alreadyCompleted}/${nodes.length} nodes already completed, processing ${unprocessedNodes.length} remaining.`);
+      }
+
+      setGraphProgress({ current: alreadyCompleted, total: nodes.length, created: 0, active: true });
 
       const count = await factory.buildGraphLite(agentId, (current, total, created) => {
         setGraphProgress({ current, total, created, active: true });

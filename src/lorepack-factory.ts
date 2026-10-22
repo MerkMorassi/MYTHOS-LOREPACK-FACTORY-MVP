@@ -52,6 +52,10 @@ export class LorepackFactory {
     this.packer.setApiKeys(keys);
   }
 
+  async getEmbeddings(text: string): Promise<number[] | null | undefined> {
+    return this.model.getEmbeddings(text);
+  }
+
   // ------------------------------------------------------------
   // PACKER DELEGATION
   // ------------------------------------------------------------

@@ -72,6 +72,7 @@ export const NetworkGraphView: React.FC<NetworkGraphViewProps> = ({
   agents, 
   activeAgentId: initialAgentId,
   store,
+  factory,
 }) => {
   const [selectedAgentId, setSelectedAgentId] = useState<string>(
     initialAgentId || (agents.length > 0 ? agents[0].id : 'AGENT_LIFECYCLE')
@@ -93,6 +94,8 @@ export const NetworkGraphView: React.FC<NetworkGraphViewProps> = ({
   const [isExporting, setIsExporting] = useState<boolean>(false);
   const [exportNotification, setExportNotification] = useState<string | null>(null);
   const [selectedClusterId, setSelectedClusterId] = useState<number | null>(null);
+  const [searchMode, setSearchMode] = useState<'text' | 'semantic'>('text');
+  const [filteredNodeIds, setFilteredNodeIds] = useState<Set<string> | null>(null);
   const [clusterSummary, setClusterSummary] = useState<{
     id: number;
     color: string;
@@ -100,6 +103,31 @@ export const NetworkGraphView: React.FC<NetworkGraphViewProps> = ({
     sampleLabel: string;
     nodeIds: string[];
   }[]>([]);
+
+  useEffect(() => {
+    const runSearch = async () => {
+      const q = searchTerm.trim();
+      if (!q) {
+        setFilteredNodeIds(null);
+        return;
+      }
+
+      if (searchMode === 'text') {
+        const lowerQ = q.toLowerCase();
+        const matches = nodesRef.current
+          .filter(n => n.label.toLowerCase().includes(lowerQ) || (n.text && n.text.toLowerCase().includes(lowerQ)))
+          .map(n => n.id);
+        setFilteredNodeIds(new Set(matches));
+      } else {
+        if (!factory || !store) return;
+        const vector = await factory.getEmbeddings(q);
+        if (!vector) return;
+        const results = await store.searchVectorsBySimilarity(vector, 20);
+        setFilteredNodeIds(new Set(results.map(r => r.id)));
+      }
+    };
+    runSearch();
+  }, [searchTerm, searchMode, factory, store]);
   
   const springModeRef = useRef<'elastic' | 'pin'>('elastic');
   springModeRef.current = springMode;
@@ -1050,8 +1078,7 @@ export const NetworkGraphView: React.FC<NetworkGraphViewProps> = ({
     const nodeTexts = nodeGroups.select<SVGTextElement>('.node-label');
 
     const activeNode = hoveredNode || selectedNode;
-    const query = searchTerm.trim().toLowerCase();
-    const isSearching = query.length > 0;
+    const isSearching = filteredNodeIds !== null;
     const isClusterFiltered = selectedClusterId !== null;
 
     if (!activeNode && !isSearching && !isClusterFiltered) {
@@ -1078,12 +1105,8 @@ export const NetworkGraphView: React.FC<NetworkGraphViewProps> = ({
 
     // Helper to test if a node matches search query across label, text, source, and ID
     const isSearchMatch = (d: SimNode): boolean => {
-      if (!isSearching) return false;
-      if (d.label && d.label.toLowerCase().includes(query)) return true;
-      if (d.text && d.text.toLowerCase().includes(query)) return true;
-      if (d.source && d.source.toLowerCase().includes(query)) return true;
-      if (d.id && d.id.toLowerCase().includes(query)) return true;
-      return false;
+      if (!isSearching || !filteredNodeIds) return false;
+      return filteredNodeIds.has(d.id);
     };
 
     // Helper to test if a node is connected to activeNode
@@ -1758,26 +1781,48 @@ export const NetworkGraphView: React.FC<NetworkGraphViewProps> = ({
           {/* Floating Search Filter with Matching Query Counter */}
           <div className="absolute top-4 right-4 z-10 flex items-center gap-2 bg-neutral-900/95 border border-neutral-800 px-3 py-2 backdrop-blur-md shadow-2xl rounded">
             <Search className={`w-3.5 h-3.5 ${searchTerm ? 'text-amber-400' : 'text-neutral-400'}`} />
+            <button
+              type="button"
+              onClick={() => setSearchMode(searchMode === 'text' ? 'semantic' : 'text')}
+              className={`text-[9px] px-1.5 py-0.5 rounded font-mono font-bold shrink-0 border cursor-pointer transition-colors ${
+                searchMode === 'semantic'
+                  ? 'bg-sky-950/80 text-sky-400 border-sky-800/80'
+                  : 'bg-neutral-800 text-neutral-400 border-neutral-700'
+              }`}
+              title={`Switch to ${searchMode === 'text' ? 'Semantic' : 'Text'} Search`}
+            >
+              {searchMode === 'text' ? 'TXT' : 'SEM'}
+            </button>
             <input
               type="text"
-              placeholder="Search nodes (query highlights & fades)..."
+              placeholder={`Search nodes (${searchMode === 'text' ? 'text' : 'semantic'} mode)...`}
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               onKeyDown={(e) => {
                 if (e.key === 'Escape') setSearchTerm('');
               }}
-              className="bg-transparent text-xs font-mono text-white placeholder-neutral-500 focus:outline-none w-56 sm:w-64"
+              className="bg-transparent text-xs font-mono text-white placeholder-neutral-500 focus:outline-none w-48 sm:w-56"
             />
             {searchTerm.trim() && (
               <span
                 className={`text-[10px] px-1.5 py-0.5 rounded font-mono font-bold shrink-0 border ${
-                  matchingNodeCount > 0
+                  (filteredNodeIds?.size || 0) > 0
                     ? 'bg-amber-950/80 text-amber-400 border-amber-800/80'
                     : 'bg-rose-950/80 text-rose-400 border-rose-800/80'
                 }`}
               >
-                {matchingNodeCount} {matchingNodeCount === 1 ? 'match' : 'matches'}
+                {(filteredNodeIds?.size || 0)} {((filteredNodeIds?.size || 0) === 1 ? 'match' : 'matches')}
               </span>
+            )}
+            {searchTerm.trim() && (
+              <button
+                type="button"
+                onClick={() => setSearchTerm('')}
+                className="text-neutral-500 hover:text-white transition-colors"
+                title="Clear Search"
+              >
+                <Crosshair className="w-3 h-3" />
+              </button>
             )}
             {searchTerm && (
               <button

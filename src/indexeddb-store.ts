@@ -8,11 +8,17 @@ export class IndexedDbLorepackStore implements LorepackStore {
 
   constructor(
     private readonly databaseName = 'mythos_vault',
-    private readonly databaseVersion = 10,
+    private readonly databaseVersion = 11,
   ) {}
 
   async addVectors(vectors: VectorRecord[]): Promise<void> {
-    await this.writeMany(VECTOR_STORE, vectors.filter((vector) => Array.isArray(vector.vector)));
+    const validVectors = vectors
+      .filter((vector) => Array.isArray(vector.vector))
+      .map((vector) => ({
+        ...vector,
+        processing_status: vector.processing_status || 'pending',
+      }));
+    await this.writeMany(VECTOR_STORE, validVectors);
   }
 
   async getVectorsByAgent(agentId: string): Promise<VectorRecord[]> {
@@ -21,6 +27,37 @@ export class IndexedDbLorepackStore implements LorepackStore {
 
   async getAllVectors(): Promise<VectorRecord[]> {
     return this.readAll<VectorRecord>(VECTOR_STORE);
+  }
+
+  async getUnprocessedVectorsByAgent(agentId: string): Promise<VectorRecord[]> {
+    const allForAgent = await this.getVectorsByAgent(agentId);
+    return allForAgent.filter((v) => v.processing_status !== 'completed');
+  }
+
+  async updateVectorProcessingStatus(
+    ids: string[],
+    status: 'pending' | 'processing' | 'completed' | 'error'
+  ): Promise<void> {
+    if (ids.length === 0) return;
+    const database = await this.open();
+    const idSet = new Set(ids);
+    return new Promise<void>((resolve, reject) => {
+      const transaction = database.transaction(VECTOR_STORE, 'readwrite');
+      const store = transaction.objectStore(VECTOR_STORE);
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(transaction.error);
+
+      for (const id of idSet) {
+        const getReq = store.get(id);
+        getReq.onsuccess = () => {
+          const record = getReq.result as VectorRecord | undefined;
+          if (record) {
+            record.processing_status = status;
+            store.put(record);
+          }
+        };
+      }
+    });
   }
 
   async addTripletEdges(edges: TripletEdge[]): Promise<void> {
@@ -48,6 +85,7 @@ export class IndexedDbLorepackStore implements LorepackStore {
           const store = database.createObjectStore(VECTOR_STORE, { keyPath: 'id' });
           store.createIndex('agentId', 'agentId', { unique: false });
           store.createIndex('numMarkId', 'numMarkId', { unique: false });
+          store.createIndex('processing_status', 'processing_status', { unique: false });
         } else if (tx) {
           const store = tx.objectStore(VECTOR_STORE);
           if (!store.indexNames.contains('agentId')) {
@@ -55,6 +93,9 @@ export class IndexedDbLorepackStore implements LorepackStore {
           }
           if (!store.indexNames.contains('numMarkId')) {
             store.createIndex('numMarkId', 'numMarkId', { unique: false });
+          }
+          if (!store.indexNames.contains('processing_status')) {
+            store.createIndex('processing_status', 'processing_status', { unique: false });
           }
         }
 
@@ -139,7 +180,10 @@ export class IndexedDbLorepackStore implements LorepackStore {
 
       for (const vector of vectors) {
         if (Array.isArray(vector.vector)) {
-          vectorStore.put(vector);
+          vectorStore.put({
+            ...vector,
+            processing_status: vector.processing_status || 'pending',
+          });
         }
       }
 
@@ -313,6 +357,33 @@ export class IndexedDbLorepackStore implements LorepackStore {
         }
       }, 800);
     });
+  }
+
+  private cosineSimilarity(a: number[], b: number[]): number {
+    let dotProduct = 0;
+    let magnitudeA = 0;
+    let magnitudeB = 0;
+    for (let i = 0; i < a.length; i++) {
+      dotProduct += a[i] * b[i];
+      magnitudeA += a[i] * a[i];
+      magnitudeB += b[i] * b[i];
+    }
+    magnitudeA = Math.sqrt(magnitudeA);
+    magnitudeB = Math.sqrt(magnitudeB);
+    if (magnitudeA === 0 || magnitudeB === 0) return 0;
+    return dotProduct / (magnitudeA * magnitudeB);
+  }
+
+  async searchVectorsBySimilarity(queryVector: number[], limit: number): Promise<VectorRecord[]> {
+    const allVectors = await this.getAllVectors();
+    return allVectors
+      .map(v => ({
+        vector: v,
+        similarity: this.cosineSimilarity(queryVector, v.vector)
+      }))
+      .sort((a, b) => b.similarity - a.similarity)
+      .slice(0, limit)
+      .map(v => v.vector);
   }
 }
 
