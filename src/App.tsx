@@ -6,7 +6,7 @@ import React, { useEffect, useState, useRef } from 'react';
 import { LorepackFactory } from './lorepack-factory.ts';
 import { IndexedDbLorepackStore } from './indexeddb-store.ts';
 import { GeminiProvider } from './providers/gemini-provider.ts';
-import type { VectorRecord, TripletEdge } from './types.ts';
+import type { VectorRecord, TripletEdge, KernelSnapshot } from './types.ts';
 import { 
   CANONICAL_MYTHOS_AGENTS, 
   DEFAULT_CANONICAL_AGENT, 
@@ -22,6 +22,7 @@ import { LorepackAccessDenied } from './components/LorepackAccessDenied.tsx';
 import { BatchIngestionSummary, type IngestionSummaryData } from './components/BatchIngestionSummary.tsx';
 import { MintChip } from './components/MintChip.tsx';
 import { PipelineFlowView } from './components/PipelineFlowView.tsx';
+import { PINNED_MODEL } from './mint-gate.ts';
 import type { PipelineState, PipelineStepId, PipelineStepInfo, OptimizationConfig } from './types.ts';
 import { 
   BulkOperationView, type BulkDocument 
@@ -218,6 +219,21 @@ export default function App() {
     return path.includes('/lorepack') || path.includes('/factory') || path.includes('/models');
   });
   const [showAgentDetails, setShowAgentDetails] = useState<boolean>(false);
+  const [generationModel, setGenerationModel] = useState<string>(() => {
+    return localStorage.getItem('mythos_generation_model') || 'gemini-3.6-flash';
+  });
+  const [embeddingModel, setEmbeddingModel] = useState<string>(() => {
+    return localStorage.getItem('mythos_embedding_model') || PINNED_MODEL;
+  });
+  const [systemPrompt, setSystemPrompt] = useState<string>('');
+  const [snapshots, setSnapshots] = useState<KernelSnapshot[]>(() => {
+    try {
+      const saved = localStorage.getItem('mythos_kernel_snapshots');
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
 
   // --- 2. LOGGING HELPER ---
   const log = (msg: string) => {
@@ -250,6 +266,18 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    localStorage.setItem('mythos_generation_model', generationModel);
+  }, [generationModel]);
+
+  useEffect(() => {
+    localStorage.setItem('mythos_embedding_model', embeddingModel);
+  }, [embeddingModel]);
+
+  useEffect(() => {
+    localStorage.setItem('mythos_kernel_snapshots', JSON.stringify(snapshots));
+  }, [snapshots]);
+
+  useEffect(() => {
     localStorage.setItem('mythos_autosave_archive', String(autoSaveArchive));
   }, [autoSaveArchive]);
 
@@ -271,9 +299,52 @@ export default function App() {
       ...prev,
       agentId,
     }));
+    // Sync system prompt from agent if not already set or changed
+    const active = getCanonicalAgentById(agentId) || DEFAULT_CANONICAL_AGENT;
+    setSystemPrompt(active.system_instruction);
   }, [agentId]);
 
   // --- 4. CORE ENGINE FUNCTIONS ---
+  const handleSaveSnapshot = (name: string, systemPrompt?: string) => {
+    const newSnapshot: KernelSnapshot = {
+      id: `snap-${Date.now()}`,
+      name,
+      createdAt: Date.now(),
+      config: {
+        batchSize,
+        lanesPerKey,
+        chunkSize,
+        graphThreshold,
+        processingStrategy,
+        generationModel,
+        embeddingModel,
+        systemPrompt,
+      }
+    };
+    setSnapshots(prev => [newSnapshot, ...prev]);
+    log(`[KERNEL]: Saved state snapshot "${name}".`);
+  };
+
+  const handleApplySnapshot = (snapshot: KernelSnapshot) => {
+    const { config } = snapshot;
+    setBatchSize(config.batchSize);
+    setLanesPerKey(config.lanesPerKey);
+    setChunkSize(config.chunkSize);
+    setGraphThreshold(config.graphThreshold);
+    setProcessingStrategy(config.processingStrategy);
+    setGenerationModel(config.generationModel);
+    setEmbeddingModel(config.embeddingModel);
+    if (config.systemPrompt !== undefined) {
+      setSystemPrompt(config.systemPrompt);
+    }
+    log(`[KERNEL]: Applied state snapshot "${snapshot.name}".`);
+  };
+
+  const handleDeleteSnapshot = (id: string) => {
+    setSnapshots(prev => prev.filter(s => s.id !== id));
+    log(`[KERNEL]: Deleted state snapshot.`);
+  };
+
   const performAutoSaveArchive = async () => {
     if (!factory) return;
     try {
@@ -2207,6 +2278,16 @@ export default function App() {
             setChunkSize={setChunkSize}
             graphThreshold={graphThreshold}
             setGraphThreshold={setGraphThreshold}
+            generationModel={generationModel}
+            setGenerationModel={setGenerationModel}
+            embeddingModel={embeddingModel}
+            setEmbeddingModel={setEmbeddingModel}
+            systemPrompt={systemPrompt}
+            setSystemPrompt={setSystemPrompt}
+            snapshots={snapshots}
+            onSaveSnapshot={handleSaveSnapshot}
+            onApplySnapshot={handleApplySnapshot}
+            onDeleteSnapshot={handleDeleteSnapshot}
           />
         </main>
       ) : activeNavTab === 'graph-view' ? (

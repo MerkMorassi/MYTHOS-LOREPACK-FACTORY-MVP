@@ -11,7 +11,7 @@ import {
   getCanonicalAgentById,
 } from '../agents.ts';
 
-import { PipelineState, PipelineStepId } from '../types.ts';
+import { PipelineState, PipelineStepId, KernelSnapshot } from '../types.ts';
 
 export interface MonolithicLogEntry {
   id: string;
@@ -51,6 +51,16 @@ interface MonolithicViewProps {
   setChunkSize: (val: number) => void;
   graphThreshold: number;
   setGraphThreshold: (val: number) => void;
+  generationModel: string;
+  setGenerationModel: (val: string) => void;
+  embeddingModel: string;
+  setEmbeddingModel: (val: string) => void;
+  systemPrompt: string;
+  setSystemPrompt: (val: string) => void;
+  snapshots: KernelSnapshot[];
+  onSaveSnapshot: (name: string, systemPrompt?: string) => void;
+  onApplySnapshot: (snapshot: KernelSnapshot) => void;
+  onDeleteSnapshot: (id: string) => void;
 }
 
 // Model Health Indicator
@@ -125,12 +135,21 @@ export const MonolithicView: React.FC<MonolithicViewProps> = ({
   setChunkSize,
   graphThreshold,
   setGraphThreshold,
+  generationModel,
+  setGenerationModel,
+  embeddingModel,
+  setEmbeddingModel,
+  systemPrompt,
+  setSystemPrompt,
+  snapshots,
+  onSaveSnapshot,
+  onApplySnapshot,
+  onDeleteSnapshot,
 }) => {
   // Current active canonical agent
   const activeAgent = getCanonicalAgentById(agentId) || CANONICAL_MYTHOS_AGENTS[0];
 
   // Monolithic Control States
-  const [generationModel, setGenerationModel] = useState<string>('gemini-3.6-flash');
   const [availableModels, setAvailableModels] = useState<string[]>([
     'gemini-3.1-flash-lite',
     'gemini-3.1-pro-preview',
@@ -146,8 +165,9 @@ export const MonolithicView: React.FC<MonolithicViewProps> = ({
   const [showAgentIdentity, setShowAgentIdentity] = useState<boolean>(false);
   const [showGenerationModel, setShowGenerationModel] = useState<boolean>(false);
   const [showPrompt, setShowPrompt] = useState<boolean>(false);
-  const [systemPrompt, setSystemPrompt] = useState<string>(activeAgent.system_instruction);
   const [showKeys, setShowKeys] = useState<boolean>(false);
+  const [showSnapshots, setShowSnapshots] = useState<boolean>(false);
+  const [newSnapshotName, setNewSnapshotName] = useState<string>('');
 
   // Active Agent Inline Dossier Customization State
   const [showDossierEditor, setShowDossierEditor] = useState<boolean>(false);
@@ -251,7 +271,6 @@ export const MonolithicView: React.FC<MonolithicViewProps> = ({
   const [showEmbeddingModel, setShowEmbeddingModel] = useState<boolean>(false);
   const [showOperations, setShowOperations] = useState<boolean>(true);
   const [isParametersLocked, setIsParametersLocked] = useState<boolean>(false);
-  const [embeddingModel, setEmbeddingModel] = useState<string>(PINNED_MODEL);
   const [availableEmbeddingModels, setAvailableEmbeddingModels] = useState<string[]>([
     ...SUPPORTED_EMBEDDING_MODELS,
   ]);
@@ -300,10 +319,7 @@ export const MonolithicView: React.FC<MonolithicViewProps> = ({
     }
   }, [logs]);
 
-  // Sync active agent prompt when agent changes
-  useEffect(() => {
-    setSystemPrompt(activeAgent.system_instruction);
-  }, [agentId, activeAgent.system_instruction]);
+  // Redundant effect removed - systemPrompt is now managed in App.tsx
 
   const addLog = (
     msg: string,
@@ -1047,6 +1063,87 @@ ${stagedFiles.map(f => `FILE: ${f.name}\nCONTENT:\n${f.text}`).join('\n\n')}`;
                         )}
                       </div>
                     </div>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+          
+          {/* Kernel State Snapshots Collapsible */}
+          <div className="border border-[#2a2a2a] bg-[#161616] p-2.5 flex flex-col gap-2 rounded-none">
+            <label
+              onClick={() => setShowSnapshots(!showSnapshots)}
+              className="text-[11px] uppercase tracking-wider text-[#8a8a8a] cursor-pointer flex justify-between select-none hover:text-white"
+            >
+              <span>[{showSnapshots ? '−' : '+'}] KERNEL SNAPSHOTS</span>
+              <span className="text-[10px] text-[#00ff41]">[{snapshots.length}]</span>
+            </label>
+            {showSnapshots && (
+              <div className="pt-2 border-t border-[#2a2a2a] flex flex-col gap-3">
+                {/* Save New Snapshot */}
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-[9px] uppercase tracking-wider text-[#777777]">Save Current State:</label>
+                  <div className="flex gap-1">
+                    <input
+                      type="text"
+                      value={newSnapshotName}
+                      onChange={(e) => setNewSnapshotName(e.target.value)}
+                      placeholder="Snapshot name..."
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && newSnapshotName.trim()) {
+                          onSaveSnapshot(newSnapshotName.trim(), systemPrompt);
+                          setNewSnapshotName('');
+                        }
+                      }}
+                      className="flex-1 bg-[#1a1a1a] border border-[#333333] text-[#e0e0e0] px-2 py-1 text-[10px] font-mono focus:border-[#00ff41] outline-none"
+                    />
+                    <button
+                      onClick={() => {
+                        if (newSnapshotName.trim()) {
+                          onSaveSnapshot(newSnapshotName.trim(), systemPrompt);
+                          setNewSnapshotName('');
+                        }
+                      }}
+                      disabled={!newSnapshotName.trim()}
+                      className="bg-neutral-800 hover:bg-[#00ff41] hover:text-black disabled:opacity-30 text-[#00ff41] p-1 transition-colors cursor-pointer"
+                      title="Save Snapshot"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+
+                {/* Snapshots List */}
+                <div className="flex flex-col gap-1 max-h-48 overflow-y-auto custom-scrollbar">
+                  {snapshots.length === 0 ? (
+                    <div className="text-[9px] text-neutral-600 italic py-2 text-center border border-dashed border-neutral-800">
+                      No snapshots stored.
+                    </div>
+                  ) : (
+                    snapshots.map((s) => (
+                      <div key={s.id} className="group flex items-center justify-between bg-[#121212] border border-[#222] p-1.5 hover:border-[#444] transition-colors">
+                        <div className="flex flex-col min-w-0 flex-1 cursor-pointer" onClick={() => onApplySnapshot(s)}>
+                          <span className="text-[10px] font-bold text-white truncate group-hover:text-[#00ff41]">{s.name}</span>
+                          <span className="text-[8px] text-neutral-500">{new Date(s.createdAt).toLocaleDateString()} {new Date(s.createdAt).toLocaleTimeString()}</span>
+                        </div>
+                        <div className="flex items-center gap-1">
+                          <button
+                            onClick={() => onApplySnapshot(s)}
+                            className="p-1 text-neutral-500 hover:text-white"
+                            title="Apply Snapshot"
+                          >
+                            <RotateCcw className="w-3 h-3" />
+                          </button>
+                          <button
+                            onClick={() => onDeleteSnapshot(s.id)}
+                            className="p-1 text-neutral-500 hover:text-rose-500"
+                            title="Delete Snapshot"
+                          >
+                            <Trash2 className="w-3 h-3" />
+                          </button>
+                        </div>
+                      </div>
+                    ))
                   )}
                 </div>
               </div>

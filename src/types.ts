@@ -119,3 +119,19 @@ export interface OptimizationConfig {
   chunkSize?: number;
   graphThreshold?: number;
 }
+
+export interface KernelSnapshot {
+  id: string;
+  name: string;
+  createdAt: number;
+  config: {
+    batchSize: number;
+    lanesPerKey: number;
+    chunkSize: number;
+    graphThreshold: number;
+    processingStrategy: 'fast' | 'bulk';
+    generationModel: string;
+    embeddingModel: string;
+    systemPrompt?: string;
+  };
+}
