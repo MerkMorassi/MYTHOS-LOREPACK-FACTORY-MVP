@@ -86,15 +86,26 @@ export interface PipelineStepInfo {
   completedAt?: number;
 }
 
+export interface BatchFileStatus {
+  name: string;
+  progress: number; // 0-100
+  status: 'pending' | 'processing' | 'completed' | 'error';
+  error?: string;
+  size?: number;
+}
+
 export interface PipelineState {
   agentId: string;
   active: boolean;
+  paused: boolean;
+  autoRetry: boolean;
   currentStepId: PipelineStepId | null;
   lastFailedStepId: PipelineStepId | null;
   lastCompletedStepId: PipelineStepId | null;
   overallProgress: number;
   steps: Record<PipelineStepId, PipelineStepInfo>;
   logs: Array<{ time: string; msg: string; type: 'info' | 'ok' | 'err' }>;
+  batchFiles: BatchFileStatus[];
   exportedBlob?: Blob;
   exportedFilename?: string;
 }

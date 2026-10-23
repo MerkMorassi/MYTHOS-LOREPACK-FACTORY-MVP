@@ -117,18 +117,20 @@ export class LorepackFactory {
     agentId: string,
     onProgress?: (current: number, total: number, created: number) => void,
     modelName?: string,
-    config?: OptimizationConfig
+    config?: OptimizationConfig,
+    signal?: AbortSignal
   ): Promise<number> {
-    return this.packer.buildGraph(agentId, onProgress, modelName, config);
+    return this.packer.buildGraph(agentId, onProgress, modelName, config, signal);
   }
 
   async buildGraphLite(
     agentId: string,
     onProgress?: (current: number, total: number, created: number) => void,
     modelName?: string,
-    config?: OptimizationConfig
+    config?: OptimizationConfig,
+    signal?: AbortSignal
   ): Promise<number> {
-    return this.packer.buildGraphLite(agentId, onProgress, modelName, config);
+    return this.packer.buildGraphLite(agentId, onProgress, modelName, config, signal);
   }
 
   yieldExportBatches(agentId: string, batchSize = 1000): AsyncGenerator<object[]> {

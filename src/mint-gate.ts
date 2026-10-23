@@ -201,7 +201,8 @@ export async function embedAllResumable(
   hooks: ResumeHooks,
   model: string = PINNED_MODEL,
   dim: number = PINNED_DIM,
-  batchSize: number = EMBED_BATCH
+  batchSize: number = EMBED_BATCH,
+  signal?: AbortSignal
 ): Promise<Map<string, number[]>> {
   const total = records.length;
   const done: Record<string, number[]> = {};
@@ -218,6 +219,10 @@ export async function embedAllResumable(
     );
   }
   for (let i = 0; i < pending.length; i += batchSize) {
+    if (signal?.aborted) {
+      hooks.onEvent("ABORTED :: pipeline halt requested");
+      throw new Error("MINT ABORTED :: user requested halt");
+    }
     const slice = pending.slice(i, i + batchSize);
     let attempt = 0;
     for (;;) {

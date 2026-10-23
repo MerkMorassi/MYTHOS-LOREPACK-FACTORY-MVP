@@ -329,7 +329,8 @@ export class LorepackPacker {
         hooks,
         activeModel,
         PINNED_DIM,
-        options.batchSize || 10
+        options.batchSize || 10,
+        options.signal
       );
     } catch (err: any) {
       // Record failed[] with IDs and surface the refusal verbatim
@@ -444,7 +445,8 @@ export class LorepackPacker {
     agentId: string,
     onProgress?: (current: number, total: number, created: number) => void,
     modelName = 'gemini-3.6-flash',
-    config?: OptimizationConfig
+    config?: OptimizationConfig,
+    signal?: AbortSignal
   ): Promise<number> {
     const allNodes = await this.store.getVectorsByAgent(agentId);
 
@@ -491,6 +493,9 @@ export class LorepackPacker {
     let completedCount = allNodes.length - uncompletedNodes.length;
 
     for (let offset = 0; offset < uncompletedNodes.length; offset += batchSize) {
+      if (signal?.aborted) {
+        throw new Error('GRAPH SYNTHESIS ABORTED :: user requested halt');
+      }
       const batch = uncompletedNodes.slice(offset, offset + batchSize);
       
       // Mark current batch as processing
@@ -554,9 +559,10 @@ export class LorepackPacker {
     agentId: string,
     onProgress?: (current: number, total: number, created: number) => void,
     modelName = 'gemini-3.6-flash',
-    config?: OptimizationConfig
+    config?: OptimizationConfig,
+    signal?: AbortSignal
   ): Promise<number> {
-    return this.buildGraph(agentId, onProgress, modelName, config);
+    return this.buildGraph(agentId, onProgress, modelName, config, signal);
   }
 
   // ------------------------------------------------------------

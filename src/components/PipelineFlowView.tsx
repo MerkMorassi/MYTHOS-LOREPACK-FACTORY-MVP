@@ -18,7 +18,12 @@ import {
   Sparkles,
   Search,
   ExternalLink,
-  ChevronRight
+  ChevronRight,
+  Pause,
+  CirclePause,
+  CirclePlay,
+  FileSearch,
+  Activity
 } from 'lucide-react';
 import type { PipelineState, PipelineStepId } from '../types.ts';
 import type { CanonicalAgent } from '../agents.ts';
@@ -31,6 +36,8 @@ interface PipelineFlowViewProps {
   totalVaultEdges: number;
   onRunFullPipeline: () => void;
   onResumeFromStep: (stepId: PipelineStepId) => void;
+  onTogglePause: () => void;
+  onToggleAutoRetry: () => void;
   onSelectTab: (tabId: any) => void;
   processingStrategy: 'fast' | 'bulk';
 }
@@ -43,9 +50,12 @@ export const PipelineFlowView: React.FC<PipelineFlowViewProps> = ({
   totalVaultEdges,
   onRunFullPipeline,
   onResumeFromStep,
+  onTogglePause,
+  onToggleAutoRetry,
   onSelectTab,
   processingStrategy,
 }) => {
+  const [batchFilter, setBatchFilter] = React.useState<'all' | 'success' | 'error'>('all');
   const stepsOrder: PipelineStepId[] = ['stage', 'ingest', 'graph', 'test', 'ship'];
 
   const stepMeta: Record<
@@ -146,6 +156,16 @@ export const PipelineFlowView: React.FC<PipelineFlowViewProps> = ({
             }`}>
               MODE: {processingStrategy === 'fast' ? 'Fast Build' : 'Bulk Batch'}
             </span>
+            <button
+              onClick={onToggleAutoRetry}
+              className={`px-1.5 py-0.5 border font-mono text-[10px] font-bold uppercase tracking-wider rounded cursor-pointer transition-colors ${
+                pipeline.autoRetry 
+                ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-400' 
+                : 'bg-neutral-800 border-neutral-700 text-neutral-500'
+              }`}
+            >
+              AUTO-RETRY: {pipeline.autoRetry ? 'ON' : 'OFF'}
+            </button>
           </div>
           <h1 className="text-lg sm:text-xl font-black uppercase tracking-wider text-white flex items-center gap-2">
             <Workflow className="w-5 h-5 text-[#00ff41]" />
@@ -170,16 +190,40 @@ export const PipelineFlowView: React.FC<PipelineFlowViewProps> = ({
             </button>
           )}
 
+          {pipeline.active && (
+            <button
+              type="button"
+              onClick={onTogglePause}
+              className={`flex-1 md:flex-initial inline-flex items-center justify-center gap-2 px-4 py-2 border font-mono text-xs font-bold uppercase tracking-wider cursor-pointer transition-colors ${
+                pipeline.paused 
+                ? 'bg-amber-500 hover:bg-amber-600 border-amber-600 text-black shadow-[0_0_15px_rgba(245,158,11,0.25)]' 
+                : 'bg-neutral-800 hover:bg-neutral-700 border-neutral-600 text-white'
+              }`}
+            >
+              {pipeline.paused ? (
+                <>
+                  <CirclePlay className="w-3.5 h-3.5" />
+                  <span>Resume</span>
+                </>
+              ) : (
+                <>
+                  <Pause className="w-3.5 h-3.5" />
+                  <span>Global Pause</span>
+                </>
+              )}
+            </button>
+          )}
+
           <button
             type="button"
-            disabled={pipeline.active}
+            disabled={pipeline.active && !pipeline.paused}
             onClick={onRunFullPipeline}
             className="flex-1 md:flex-initial inline-flex items-center justify-center gap-2 px-4 py-2 bg-[#00ff41] hover:bg-[#00ff66] disabled:opacity-40 text-black font-mono text-xs font-black uppercase tracking-wider cursor-pointer transition-colors shadow-[0_0_15px_rgba(0,255,65,0.25)]"
           >
             {pipeline.active ? (
               <>
                 <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                <span>Running Pipeline ({pipeline.overallProgress}%)...</span>
+                <span>{pipeline.paused ? 'Pipeline Paused' : `Running Pipeline (${pipeline.overallProgress}%)`}</span>
               </>
             ) : (
               <>
@@ -304,6 +348,118 @@ export const PipelineFlowView: React.FC<PipelineFlowViewProps> = ({
             </div>
           );
         })}
+      </div>
+
+      {/* Batch Monitor UI section */}
+      <div className="bg-[#121212] border border-[#242424] p-4 flex flex-col gap-3 mb-8">
+        <div className="flex flex-col md:flex-row md:items-center justify-between border-b border-[#222] pb-3 gap-4">
+          <div className="flex items-center gap-2">
+            <Activity className="w-4 h-4 text-sky-400" />
+            <h2 className="text-xs font-mono font-bold uppercase tracking-wider text-white">
+              Batch Monitor: Document Status
+            </h2>
+          </div>
+          
+          <div className="flex items-center gap-2 self-end md:self-auto">
+            <div className="flex bg-neutral-900 border border-neutral-800 p-0.5 rounded shadow-inner">
+              {(['all', 'success', 'error'] as const).map((f) => (
+                <button
+                  key={f}
+                  onClick={() => setBatchFilter(f)}
+                  className={`px-3 py-1 text-[9px] font-mono font-bold uppercase tracking-widest transition-all cursor-pointer rounded ${
+                    batchFilter === f 
+                    ? 'bg-neutral-800 text-white shadow-sm' 
+                    : 'text-neutral-500 hover:text-neutral-300'
+                  }`}
+                >
+                  {f}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 text-[10px] font-mono text-neutral-500 uppercase">
+            <span>Pool: {pipeline.batchFiles.length}</span>
+            <span className="text-[#222]">|</span>
+            <span>OK: {pipeline.batchFiles.filter(f => f.status === 'completed').length}</span>
+            <span className="text-[#222]">|</span>
+            <span>ERR: {pipeline.batchFiles.filter(f => f.status === 'error').length}</span>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 divide-y divide-[#1c1c1c] max-h-[300px] overflow-y-auto pr-2 custom-scrollbar">
+          {pipeline.batchFiles.length === 0 ? (
+            <div className="py-8 text-center flex flex-col items-center gap-2 text-neutral-600">
+              <FileSearch className="w-8 h-8 opacity-20" />
+              <span className="text-[11px] uppercase tracking-widest font-mono">No documents in active pipeline pool</span>
+            </div>
+          ) : pipeline.batchFiles.filter(f => {
+            if (batchFilter === 'all') return true;
+            if (batchFilter === 'success') return f.status === 'completed';
+            if (batchFilter === 'error') return f.status === 'error';
+            return true;
+          }).length === 0 ? (
+            <div className="py-8 text-center flex flex-col items-center gap-2 text-neutral-700 font-mono text-[10px] uppercase tracking-wider">
+              No documents matching "{batchFilter}" filter
+            </div>
+          ) : (
+            pipeline.batchFiles
+              .filter(f => {
+                if (batchFilter === 'all') return true;
+                if (batchFilter === 'success') return f.status === 'completed';
+                if (batchFilter === 'error') return f.status === 'error';
+                return true;
+              })
+              .map((file, idx) => (
+              <div key={idx} className="py-2.5 flex items-center justify-between group">
+                <div className="flex items-center gap-3 overflow-hidden">
+                  <div className={`w-1.5 h-1.5 rounded-full ${
+                    file.status === 'completed' ? 'bg-[#00ff41]' : 
+                    file.status === 'processing' ? 'bg-amber-500 animate-pulse' : 
+                    file.status === 'error' ? 'bg-[#ff3300]' : 'bg-neutral-800'
+                  }`} />
+                  <div className="flex flex-col min-w-0">
+                    <span className="text-[11px] font-bold text-neutral-300 truncate font-mono uppercase tracking-tight">
+                      {file.name}
+                    </span>
+                    <span className="text-[9px] text-neutral-600 font-mono">
+                      {(file.size ? (file.size / 1024).toFixed(1) : 0)} KB
+                    </span>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-4 shrink-0">
+                  <div className="flex flex-col items-end gap-1">
+                    <div className="flex items-center gap-2">
+                      <span className={`text-[10px] font-mono font-bold ${
+                        file.status === 'completed' ? 'text-[#00ff41]' : 
+                        file.status === 'processing' ? 'text-amber-500' : 
+                        file.status === 'error' ? 'text-[#ff3300]' : 'text-neutral-600'
+                      }`}>
+                        {file.status.toUpperCase()}
+                      </span>
+                      <span className="text-[10px] font-mono text-neutral-400 w-8 text-right">
+                        {file.progress}%
+                      </span>
+                    </div>
+                    <div className="w-24 bg-[#1c1c1c] h-1 rounded-full overflow-hidden">
+                      <div 
+                        className={`h-full transition-all duration-300 ${
+                          file.status === 'completed' ? 'bg-[#00ff41]' : 
+                          file.status === 'processing' ? 'bg-amber-500' : 
+                          file.status === 'error' ? 'bg-[#ff3300]' : 'bg-neutral-800'
+                        }`}
+                        style={{ width: `${file.progress}%` }}
+                      />
+                    </div>
+                  </div>
+                  {file.status === 'completed' && <Check className="w-3.5 h-3.5 text-[#00ff41]" />}
+                  {file.status === 'error' && <AlertTriangle className="w-3.5 h-3.5 text-[#ff3300]" />}
+                </div>
+              </div>
+            ))
+          )}
+        </div>
       </div>
 
       {/* Execution Diagnostics & Log Console */}

@@ -142,6 +142,8 @@ export const DEFAULT_PERSONA_PRESETS: PersonaPreset[] = [
 export const INITIAL_PIPELINE_STATE = (agentId: string): PipelineState => ({
   agentId,
   active: false,
+  paused: false,
+  autoRetry: false,
   currentStepId: null,
   lastFailedStepId: null,
   lastCompletedStepId: null,
@@ -154,25 +156,76 @@ export const INITIAL_PIPELINE_STATE = (agentId: string): PipelineState => ({
     ship: { id: 'ship', label: 'Golden Query & Ship', sublabel: 'GZIP Distribution', status: 'idle', progress: 0 },
   },
   logs: [],
+  batchFiles: [],
 });
 
 export default function App() {
-  // GateKeeper Sigil Authentication & Session States
+  // --- 1. CORE STATE & REFS (Top-level) ---
   const [authStatus, setAuthStatus] = useState<'checking' | 'authenticated' | 'unauthenticated'>('checking');
   const [activeSession, setActiveSession] = useState<SigilSession | null>(null);
-
-  // Heuristic routing for Lorepack-specific denial branding
+  const [agentId, setAgentId] = useState<string>(DEFAULT_CANONICAL_AGENT.id);
+  const [agentHandle, setAgentHandle] = useState<string>(DEFAULT_CANONICAL_AGENT.handle);
+  const [activeNavTab, setActiveNavTab] = useState<AppSectionTab>('monolithic');
+  const [factory, setFactory] = useState<LorepackFactory | null>(null);
+  const [store, setStore] = useState<IndexedDbLorepackStore | null>(null);
+  const [provider, setProvider] = useState<GeminiProvider | null>(null);
+  const [dbState, setDbState] = useState<'DISCONNECTED' | 'CONNECTED' | 'ERROR'>('DISCONNECTED');
+  const [apiState, setApiState] = useState<'UNTESTED' | 'ONLINE' | 'ERROR'>('UNTESTED');
+  const [systemLog, setSystemLog] = useState<string[]>(['[SYSTEM]: Booting MythOS memory system...']);
+  const [customApiKeys, setCustomApiKeys] = useState<string[]>([]);
+  const [newKeyInput, setNewKeyInput] = useState<string>('');
+  const [showSettingsModal, setShowSettingsModal] = useState<boolean>(false);
+  const [autoSaveArchive, setAutoSaveArchive] = useState<boolean>(() => {
+    return localStorage.getItem('mythos_autosave_archive') === 'true';
+  });
+  const [pipeline, setPipeline] = useState<PipelineState>(() => {
+    try {
+      const saved = localStorage.getItem('mythos_pipeline_state');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        return {
+          ...INITIAL_PIPELINE_STATE(DEFAULT_CANONICAL_AGENT.id),
+          ...parsed,
+          active: false,
+          paused: false,
+        };
+      }
+    } catch (err) {}
+    return INITIAL_PIPELINE_STATE(DEFAULT_CANONICAL_AGENT.id);
+  });
+  const isPausedRef = useRef(false);
+  const pipelineAbortControllerRef = useRef<AbortController | null>(null);
+  const [processingStrategy, setProcessingStrategy] = useState<'fast' | 'bulk'>('fast');
+  const [stagedFiles, setStagedFiles] = useState<{ name: string; size: number; text: string }[]>(() => {
+    try {
+      const saved = localStorage.getItem('mythos_staged_files');
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
+  const stagedFilesCount = stagedFiles.length;
+  const [stats, setStats] = useState<{ totalNodes: number; totalEdges: number }>({ totalNodes: 0, totalEdges: 0 });
+  const [batchSize, setBatchSize] = useState<number>(40);
+  const [lanesPerKey, setLanesPerKey] = useState<number>(2);
+  const [chunkSize, setChunkSize] = useState<number>(2000);
+  const [graphThreshold, setGraphThreshold] = useState<number>(0.78);
+  const [ingestionSummary, setIngestionSummary] = useState<IngestionSummaryData | null>(null);
+  const [hasUnresolvedFailures, setHasUnresolvedFailures] = useState<boolean>(false);
+  const [forceSigilGate, setForceSigilGate] = useState<boolean>(false);
   const [isLorepackRoute, setIsLorepackRoute] = useState<boolean>(() => {
     const path = window.location.pathname.toLowerCase();
     return path.includes('/lorepack') || path.includes('/factory') || path.includes('/models');
   });
-  const [forceSigilGate, setForceSigilGate] = useState<boolean>(false);
-  
-  // Batch Ingestion Summary Modal
-  const [ingestionSummary, setIngestionSummary] = useState<IngestionSummaryData | null>(null);
-  const [hasUnresolvedFailures, setHasUnresolvedFailures] = useState<boolean>(false);
+  const [showAgentDetails, setShowAgentDetails] = useState<boolean>(false);
 
-  // Check active Builder session on initial mount
+  // --- 2. LOGGING HELPER ---
+  const log = (msg: string) => {
+    const timestamp = new Date().toLocaleTimeString();
+    setSystemLog((prev) => [`[${timestamp}] ${msg}`, ...prev.slice(0, 49)]);
+  };
+
+  // --- 3. CORE EFFECTS ---
   useEffect(() => {
     const checkSession = async () => {
       try {
@@ -196,41 +249,31 @@ export default function App() {
     checkSession();
   }, []);
 
-  const handleLogout = async () => {
-    try {
-      await fetch('/api/auth/logout', {
-        method: 'POST',
-        headers: { 'Accept': 'application/json' },
-      });
-    } catch (err) {
-      console.warn('Logout request failed:', err);
-    }
-    setActiveSession(null);
-    setAuthStatus('unauthenticated');
-  };
-
-  // Core Engine References
-  const [factory, setFactory] = useState<LorepackFactory | null>(null);
-  const [store, setStore] = useState<IndexedDbLorepackStore | null>(null);
-  const [provider, setProvider] = useState<GeminiProvider | null>(null);
-
-  // Connection & Core Telemetry States
-  const [dbState, setDbState] = useState<'DISCONNECTED' | 'CONNECTED' | 'ERROR'>('DISCONNECTED');
-  const [apiState, setApiState] = useState<'UNTESTED' | 'ONLINE' | 'ERROR'>('UNTESTED');
-  const [systemLog, setSystemLog] = useState<string[]>(['[SYSTEM]: Booting MythOS memory system...']);
-  
-  // Custom Multi-Key Rotation Pool States
-  const [customApiKeys, setCustomApiKeys] = useState<string[]>([]);
-  const [newKeyInput, setNewKeyInput] = useState<string>('');
-  const [showSettingsModal, setShowSettingsModal] = useState<boolean>(false);
-  const [autoSaveArchive, setAutoSaveArchive] = useState<boolean>(() => {
-    return localStorage.getItem('mythos_autosave_archive') === 'true';
-  });
-
   useEffect(() => {
     localStorage.setItem('mythos_autosave_archive', String(autoSaveArchive));
   }, [autoSaveArchive]);
 
+  useEffect(() => {
+    try {
+      const { logs, ...rest } = pipeline;
+      localStorage.setItem('mythos_pipeline_state', JSON.stringify({ ...rest, logs: logs.slice(0, 20) }));
+    } catch (err) {}
+  }, [pipeline]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('mythos_staged_files', JSON.stringify(stagedFiles));
+    } catch (err) {}
+  }, [stagedFiles]);
+
+  useEffect(() => {
+    setPipeline(prev => ({
+      ...prev,
+      agentId,
+    }));
+  }, [agentId]);
+
+  // --- 4. CORE ENGINE FUNCTIONS ---
   const performAutoSaveArchive = async () => {
     if (!factory) return;
     try {
@@ -252,32 +295,51 @@ export default function App() {
     }
   };
 
-  // Navigation Section Tab State (Defaults to Monolithic Style)
-  const [activeNavTab, setActiveNavTab] = useState<AppSectionTab>('monolithic');
+  const handleLogout = async () => {
+    try {
+      await fetch('/api/auth/logout', {
+        method: 'POST',
+        headers: { 'Accept': 'application/json' },
+      });
+    } catch (err) {
+      console.warn('Logout request failed:', err);
+    }
+    setActiveSession(null);
+    setAuthStatus('unauthenticated');
+  };
 
-  // Selection (Canonical 16 MythOS Agent Roster)
-  const [agentId, setAgentId] = useState<string>(DEFAULT_CANONICAL_AGENT.id);
+  const autoRetryRef = useRef(pipeline.autoRetry);
+  const toggleAutoRetry = () => {
+    const next = !pipeline.autoRetry;
+    setPipeline(prev => ({ ...prev, autoRetry: next }));
+    autoRetryRef.current = next;
+    log(`[PIPELINE]: Auto-Retry ${next ? 'enabled' : 'disabled'}.`);
+  };
 
-  // Automated Pipeline State
-  const [pipeline, setPipeline] = useState<PipelineState>(() => INITIAL_PIPELINE_STATE(DEFAULT_CANONICAL_AGENT.id));
-  const [processingStrategy, setProcessingStrategy] = useState<'fast' | 'bulk'>('fast');
-
-  // Hyperparameters (LIFTED for Synchronization & Pipeline Optimization)
-  const [batchSize, setBatchSize] = useState<number>(40);
-  const [lanesPerKey, setLanesPerKey] = useState<number>(2);
-  const [chunkSize, setChunkSize] = useState<number>(2000);
-  const [graphThreshold, setGraphThreshold] = useState<number>(0.78);
-
-  // Update pipeline agentId when agent changes
-  useEffect(() => {
-    setPipeline(prev => ({
-      ...prev,
-      agentId,
-    }));
-  }, [agentId]);
-  const [agentHandle, setAgentHandle] = useState<string>(DEFAULT_CANONICAL_AGENT.handle);
-  const [showAgentDetails, setShowAgentDetails] = useState<boolean>(false);
-  const [stats, setStats] = useState<{ totalNodes: number; totalEdges: number }>({ totalNodes: 0, totalEdges: 0 });
+  const togglePipelinePause = () => {
+    const next = !pipeline.paused;
+    setPipeline(prev => ({ ...prev, paused: next }));
+    isPausedRef.current = next;
+    
+    if (next && pipelineAbortControllerRef.current) {
+      pipelineAbortControllerRef.current.abort();
+    }
+    
+    const time = new Date().toLocaleTimeString();
+    if (next) {
+      log('[PIPELINE]: Pause requested. Halting current chunk process...');
+      setPipeline(prev => ({
+        ...prev,
+        logs: [{ time, msg: 'Pause requested. Halting current chunk process...', type: 'info' as const }, ...prev.logs].slice(0, 100)
+      }));
+    } else {
+      log('[PIPELINE]: System resumed.');
+      setPipeline(prev => ({
+        ...prev,
+        logs: [{ time, msg: 'System resumed.', type: 'ok' as const }, ...prev.logs].slice(0, 100)
+      }));
+    }
+  };
 
   // Custom Agent Overrides (Inline Edit for Persona Tone & Architectural Constraints)
   const [agentOverrides, setAgentOverrides] = useState<Record<string, AgentCustomOverride>>(() => {
@@ -477,9 +539,6 @@ export default function App() {
     logs: [],
   });
 
-  // File Staging (LIFTED for Pipeline Orchestration)
-  const [stagedFiles, setStagedFiles] = useState<{ name: string; size: number; text: string }[]>([]);
-  const stagedFilesCount = stagedFiles.length;
 
   // Single Text File Intake States
   const txtFileInputRef = useRef<HTMLInputElement>(null);
@@ -621,11 +680,6 @@ export default function App() {
     }
   }, [destructiveFeedback]);
 
-  // Setup logging helper
-  const log = (msg: string) => {
-    const timestamp = new Date().toLocaleTimeString();
-    setSystemLog((prev) => [`[${timestamp}] ${msg}`, ...prev.slice(0, 49)]);
-  };
 
   // 1. Initialize Engine on Mount
   useEffect(() => {
@@ -1252,7 +1306,7 @@ export default function App() {
 
     // Initialize/Reset pipeline state for fresh or resume run
     setPipeline(prev => {
-      const newState = { ...prev, active: true, logs: [...prev.logs] };
+      const newState = { ...prev, active: true, paused: false, logs: [...prev.logs] };
       const stepsOrder: PipelineStepId[] = ['stage', 'ingest', 'graph', 'test', 'ship'];
       const startIndex = stepsOrder.indexOf(startStepId);
       
@@ -1267,6 +1321,16 @@ export default function App() {
           newState.steps[id].error = undefined;
         }
       });
+
+      // Initialize batch monitor list if starting fresh or from stage/ingest
+      if (startIndex <= 1) {
+        newState.batchFiles = stagedFiles.map(f => ({
+          name: f.name,
+          size: f.size,
+          progress: 0,
+          status: 'pending'
+        }));
+      }
       
       const time = new Date().toLocaleTimeString();
       newState.logs.unshift({ 
@@ -1285,6 +1349,18 @@ export default function App() {
       }));
       log(`[PIPELINE]: ${msg}`);
     };
+
+    const checkPause = async () => {
+      if (isPausedRef.current) {
+        setPipeline(prev => ({ ...prev, active: false }));
+        pipeLog('Pipeline Halted (User Requested). Use Resume to continue.', 'info');
+        return true;
+      }
+      return false;
+    };
+
+    pipelineAbortControllerRef.current = new AbortController();
+    const signal = pipelineAbortControllerRef.current.signal;
 
     const updateStep = (id: PipelineStepId, patch: Partial<PipelineStepInfo>) => {
       setPipeline(prev => {
@@ -1344,24 +1420,76 @@ export default function App() {
           let filesProcessed = 0;
           
           while (stagedFiles.length > 0) {
+            if (await checkPause()) return;
+
             const file = stagedFiles[0];
             filesProcessed++;
+            
+            setPipeline(prev => ({
+              ...prev,
+              batchFiles: prev.batchFiles.map(bf => 
+                bf.name === file.name ? { ...bf, status: 'processing' } : bf
+              )
+            }));
+
             updateStep('ingest', { progress: Math.round((filesProcessed / totalFiles) * 100), detail: `Ingesting ${file.name}...` });
             
-            const chunks = factory.chunk(file.text, chunkSize);
-            const batches = chunks.map(text => ({ text, source: file.name }));
-            
-            const result = await factory.ingestBatches(batches, {
-              agentId,
-              batchSize: batchSize,
-              config: config,
-              onProgress: (p) => {
-                // Nested progress
+            try {
+              const chunks = factory.chunk(file.text, chunkSize);
+              const batches = chunks.map(text => ({ text, source: file.name }));
+              
+              let result: any = null;
+              let retryCount = 0;
+              const maxRetries = autoRetryRef.current ? 3 : 0;
+
+              while (retryCount <= maxRetries) {
+                try {
+                  result = await factory.ingestBatches(batches, {
+                    agentId,
+                    batchSize: batchSize,
+                    config: config,
+                    signal: signal,
+                    onProgress: (p) => {
+                      const fileProgress = Math.round((p.processed / batches.length) * 100);
+                      setPipeline(prev => ({
+                        ...prev,
+                        batchFiles: prev.batchFiles.map(bf => 
+                          bf.name === file.name ? { ...bf, progress: fileProgress } : bf
+                        )
+                      }));
+                    }
+                  });
+                  break; // Success
+                } catch (ingestErr: any) {
+                  if (signal.aborted) throw ingestErr;
+                  retryCount++;
+                  if (retryCount > maxRetries) throw ingestErr;
+                  pipeLog(`Retrying "${file.name}" (Attempt ${retryCount}/${maxRetries})...`, 'info');
+                  await new Promise(r => setTimeout(r, 1000));
+                }
               }
-            });
-            
-            setStagedFiles(prev => prev.slice(1));
-            pipeLog(`Ingested "${file.name}" (+${result.ingested} records).`, 'ok');
+              
+              setPipeline(prev => ({
+                ...prev,
+                batchFiles: prev.batchFiles.map(bf => 
+                  bf.name === file.name ? { ...bf, status: 'completed', progress: 100 } : bf
+                )
+              }));
+
+              setStagedFiles(prev => prev.slice(1));
+              pipeLog(`Ingested "${file.name}" (+${result?.ingested || 0} records).`, 'ok');
+            } catch (err: any) {
+              if (signal.aborted) {
+                 return; // Handled by checkPause or outer catch if needed
+              }
+              setPipeline(prev => ({
+                ...prev,
+                batchFiles: prev.batchFiles.map(bf => 
+                  bf.name === file.name ? { ...bf, status: 'error', error: err.message || String(err) } : bf
+                )
+              }));
+              throw err; // Stop the pipeline on ingestion error
+            }
           }
         } else {
           pipeLog('No new files staged. Skipping ingestion phase.');
@@ -1387,6 +1515,7 @@ export default function App() {
           : nodes.filter(n => n.processing_status !== 'completed');
 
         if (unprocessed.length > 0) {
+          if (await checkPause()) return;
           pipeLog(`Processing ${unprocessed.length} unlinked node(s) for semantic triplets...`);
           
           if (processingStrategy === 'bulk') {
@@ -1401,14 +1530,14 @@ export default function App() {
             const createdEdges = await factory.buildGraphLite(agentId, (curr, tot, created) => {
               const p = 80 + Math.round((curr / tot) * 20);
               updateStep('graph', { progress: p, detail: `Integrating Batch results: ${curr}/${tot}` });
-            }, undefined, config);
+            }, undefined, config, signal);
             pipeLog(`Batch synthesis complete: +${createdEdges} relationship edges integrated.`, 'ok');
           } else {
             // FAST BUILD (Standard Online)
             const createdEdges = await factory.buildGraphLite(agentId, (curr, tot, created) => {
               const p = Math.round((curr / tot) * 100);
               updateStep('graph', { progress: p, detail: `Linked ${curr}/${tot} nodes (+${created} edges)` });
-            }, undefined, config);
+            }, undefined, config, signal);
             pipeLog(`Graph synthesis complete: +${createdEdges} relationship edges extracted.`, 'ok');
           }
         } else {
@@ -1504,6 +1633,9 @@ export default function App() {
       }
 
     } catch (err: any) {
+      if (signal.aborted) {
+        return; // Halt handled by checkPause or internal catch
+      }
       const errorMsg = err.message || String(err);
       const failedStepId = pipeline.currentStepId || startStepId;
       
@@ -2025,6 +2157,8 @@ export default function App() {
             totalVaultEdges={stats.totalEdges}
             onRunFullPipeline={() => handleAutoShipPipeline('stage')}
             onResumeFromStep={(stepId) => handleAutoShipPipeline(stepId)}
+            onTogglePause={togglePipelinePause}
+            onToggleAutoRetry={toggleAutoRetry}
             onSelectTab={(tabId) => setActiveNavTab(tabId as any)}
             processingStrategy={processingStrategy}
           />
