@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Lock, Edit3, Save, RotateCcw, Plus, Trash2, X, Sparkles, Bookmark, BookmarkPlus, Check } from 'lucide-react';
+import { Lock, Edit3, Save, RotateCcw, Plus, Trash2, X, Sparkles, Bookmark, BookmarkPlus, Check, Activity, Zap, Search, Database } from 'lucide-react';
 import { LorepackFactory } from '../lorepack-factory.ts';
 import { IndexedDbLorepackStore } from '../indexeddb-store.ts';
 import { GeminiProvider } from '../providers/gemini-provider.ts';
@@ -61,6 +61,8 @@ interface MonolithicViewProps {
   onSaveSnapshot: (name: string, systemPrompt?: string) => void;
   onApplySnapshot: (snapshot: KernelSnapshot) => void;
   onDeleteSnapshot: (id: string) => void;
+  lastRunResults: any;
+  lastImportResults: any;
 }
 
 // Model Health Indicator
@@ -145,6 +147,8 @@ export const MonolithicView: React.FC<MonolithicViewProps> = ({
   onSaveSnapshot,
   onApplySnapshot,
   onDeleteSnapshot,
+  lastRunResults,
+  lastImportResults,
 }) => {
   // Current active canonical agent
   const activeAgent = getCanonicalAgentById(agentId) || CANONICAL_MYTHOS_AGENTS[0];
@@ -168,6 +172,11 @@ export const MonolithicView: React.FC<MonolithicViewProps> = ({
   const [showKeys, setShowKeys] = useState<boolean>(false);
   const [showSnapshots, setShowSnapshots] = useState<boolean>(false);
   const [newSnapshotName, setNewSnapshotName] = useState<string>('');
+  const [showTelemetry, setShowTelemetry] = useState<boolean>(true);
+  const [showProbe, setShowProbe] = useState<boolean>(false);
+  const [probeQuery, setProbeQuery] = useState<string>('');
+  const [probing, setProbing] = useState<boolean>(false);
+  const [probeResults, setProbeResults] = useState<any[]>([]);
 
   // Active Agent Inline Dossier Customization State
   const [showDossierEditor, setShowDossierEditor] = useState<boolean>(false);
@@ -816,6 +825,58 @@ ${stagedFiles.map(f => `FILE: ${f.name}\nCONTENT:\n${f.text}`).join('\n\n')}`;
       addLog(`Oracle synthesis error: ${err.message}`, 'SYS', 'err');
     } finally {
       setOracleBusy(false);
+    }
+  };
+
+  const handleCrossLocusProbe = async () => {
+    const query = probeQuery.trim();
+    if (!query || !factory || !store) return;
+
+    setProbing(true);
+    addLog(`Initiating Cross-Locus Semantic Probe: "${query}"`, 'KERNEL', 'sys');
+    
+    try {
+      const results: any[] = [];
+      const agents = CANONICAL_MYTHOS_AGENTS;
+      
+      // Get embedding for query once
+      let queryVector: number[] | null = null;
+      if (provider) {
+        const res = await provider.getEmbeddings(query);
+        queryVector = res || null;
+      }
+
+      if (!queryVector) {
+        addLog(`Probe failure: Could not generate query embedding.`, 'KERNEL', 'err');
+        return;
+      }
+
+      for (const agent of agents) {
+        const vectors = await store.getVectorsByAgent(agent.id);
+        if (vectors.length === 0) continue;
+
+        const scored = vectors
+          .filter(v => Array.isArray(v.vector) && v.vector.length === queryVector!.length)
+          .map(v => ({
+            ...v,
+            score: factory.cosine(queryVector!, v.vector),
+            locusId: agent.id,
+            locusHandle: agent.handle
+          }))
+          .sort((a, b) => b.score - a.score)
+          .slice(0, 3)
+          .filter(v => v.score >= graphThreshold);
+
+        results.push(...scored);
+      }
+
+      const sortedResults = results.sort((a, b) => b.score - a.score);
+      setProbeResults(sortedResults);
+      addLog(`Probe complete. Identified ${sortedResults.length} high-confidence semantic matches across all loci.`, 'KERNEL', 'ok');
+    } catch (err: any) {
+      addLog(`Probe interrupted: ${err.message}`, 'KERNEL', 'err');
+    } finally {
+      setProbing(false);
     }
   };
 
@@ -1661,6 +1722,155 @@ ${stagedFiles.map(f => `FILE: ${f.name}\nCONTENT:\n${f.text}`).join('\n\n')}`;
                 >
                   NUKE VAULT
                 </button>
+              </div>
+            )}
+          </div>
+
+          {/* Locus Telemetry Dashboard Collapsible */}
+          <div className="border border-[#2a2a2a] bg-[#161616] p-2.5 flex flex-col gap-2 rounded-none">
+            <label
+              onClick={() => setShowTelemetry(!showTelemetry)}
+              className="text-[11px] uppercase tracking-wider text-[#8a8a8a] cursor-pointer flex justify-between select-none hover:text-white"
+            >
+              <span className="flex items-center gap-1.5">
+                <Activity className="w-3 h-3 text-[#00ff41]" />
+                <span>[{showTelemetry ? '−' : '+'}] LOCUS TELEMETRY</span>
+              </span>
+              <span className="text-[10px] text-[#00ff41]">ACTIVE</span>
+            </label>
+            {showTelemetry && (
+              <div className="pt-2 border-t border-[#2a2a2a] flex flex-col gap-3">
+                {/* Hardware/Engine Metrics */}
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="bg-[#121212] border border-[#222] p-2 flex flex-col gap-1">
+                    <span className="text-[8px] text-[#8a8a8a] uppercase tracking-tighter">Locus Load</span>
+                    <div className="flex items-end gap-1">
+                      <span className="text-sm font-bold text-white">{(stats.totalNodes / 1000).toFixed(1)}K</span>
+                      <span className="text-[8px] text-[#00ff41] mb-0.5 uppercase">Blocks</span>
+                    </div>
+                  </div>
+                  <div className="bg-[#121212] border border-[#222] p-2 flex flex-col gap-1">
+                    <span className="text-[8px] text-[#8a8a8a] uppercase tracking-tighter">Throughput</span>
+                    <div className="flex items-end gap-1">
+                      <span className="text-sm font-bold text-white">{batchSize * lanesPerKey}</span>
+                      <span className="text-[8px] text-[#ffaa00] mb-0.5 uppercase">Lanes</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Pipeline Context */}
+                <div className="flex flex-col gap-1.5">
+                  <span className="text-[9px] text-[#8a8a8a] uppercase tracking-wider font-bold">Pipeline Context:</span>
+                  <div className="space-y-1">
+                    <div className="flex justify-between text-[9px] font-mono">
+                      <span className="text-neutral-500">Status:</span>
+                      <span className={pipeline.active ? 'text-amber-400' : 'text-[#00ff41]'}>
+                        {pipeline.active ? 'RUNNING' : 'STATIONARY'}
+                      </span>
+                    </div>
+                    <div className="flex justify-between text-[9px] font-mono">
+                      <span className="text-neutral-500">Last Op:</span>
+                      <span className="text-white truncate max-w-[120px]">{lastRunResults?.sourceFilename || 'None'}</span>
+                    </div>
+                    {lastRunResults && (
+                      <div className="bg-[#0f1f14] border border-[#00ff41]/20 p-1.5 mt-1">
+                        <div className="grid grid-cols-2 gap-x-2 gap-y-1 text-[8px] font-mono">
+                          <span className="text-[#8a8a8a]">VECTORS:</span> <span className="text-white">{lastRunResults.vectorsCount}</span>
+                          <span className="text-[#8a8a8a]">EDGES:</span> <span className="text-white">{lastRunResults.edgesCount}</span>
+                          <span className="text-[#8a8a8a]">DIM:</span> <span className="text-white">{lastRunResults.vectorDimension}</span>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Model Engine Health */}
+                <div className="flex flex-col gap-1.5 pt-1 border-t border-[#222]">
+                  <div className="flex justify-between items-center">
+                    <span className="text-[9px] text-[#8a8a8a] uppercase tracking-wider">Engine Locus</span>
+                    <Zap className="w-2.5 h-2.5 text-[#ffaa00]" />
+                  </div>
+                  <div className="space-y-1.5">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[9px] text-white font-mono truncate max-w-[150px]">{generationModel}</span>
+                      <ModelHealthIndicator model={generationModel} />
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-[9px] text-white font-mono truncate max-w-[150px]">{embeddingModel}</span>
+                      <ModelHealthIndicator model={embeddingModel} />
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Cross-Locus Semantic Probe Collapsible */}
+          <div className="border border-[#2a2a2a] bg-[#161616] p-2.5 flex flex-col gap-2 rounded-none">
+            <label
+              onClick={() => setShowProbe(!showProbe)}
+              className="text-[11px] uppercase tracking-wider text-[#8a8a8a] cursor-pointer flex justify-between select-none hover:text-white"
+            >
+              <span className="flex items-center gap-1.5">
+                <Search className="w-3 h-3 text-sky-400" />
+                <span>[{showProbe ? '−' : '+'}] SEMANTIC PROBE</span>
+              </span>
+              <span className="text-[10px] text-sky-400">CROSS-LOCUS</span>
+            </label>
+            {showProbe && (
+              <div className="pt-2 border-t border-[#2a2a2a] flex flex-col gap-3">
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-[9px] uppercase tracking-wider text-[#777777]">Global Search String:</label>
+                  <div className="flex gap-1">
+                    <input
+                      type="text"
+                      value={probeQuery}
+                      onChange={(e) => setProbeQuery(e.target.value)}
+                      placeholder="Enter semantic query..."
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && probeQuery.trim() && !probing) {
+                          handleCrossLocusProbe();
+                        }
+                      }}
+                      className="flex-1 bg-[#1a1a1a] border border-[#333333] text-[#e0e0e0] px-2 py-1 text-[10px] font-mono focus:border-sky-500 outline-none"
+                    />
+                    <button
+                      onClick={handleCrossLocusProbe}
+                      disabled={!probeQuery.trim() || probing}
+                      className="bg-neutral-800 hover:bg-sky-500 hover:text-black disabled:opacity-30 text-sky-500 p-1 transition-colors cursor-pointer"
+                      title="Initiate Probe"
+                    >
+                      {probing ? <RotateCcw className="w-3.5 h-3.5 animate-spin" /> : <Zap className="w-3.5 h-3.5" />}
+                    </button>
+                  </div>
+                </div>
+
+                {/* Probe Results */}
+                <div className="flex flex-col gap-1.5 max-h-60 overflow-y-auto custom-scrollbar pr-1">
+                  {probing ? (
+                    <div className="text-[9px] text-sky-400 italic py-4 text-center animate-pulse">
+                      SCANNING ALL LOCI...
+                    </div>
+                  ) : probeResults.length === 0 ? (
+                    <div className="text-[9px] text-neutral-600 italic py-2 text-center border border-dashed border-neutral-800">
+                      No global matches identified.
+                    </div>
+                  ) : (
+                    probeResults.map((res, idx) => (
+                      <div key={`${res.locusId}-${idx}`} className="bg-[#121212] border border-[#222] p-2 flex flex-col gap-1.5 hover:border-sky-900/50 transition-colors">
+                        <div className="flex justify-between items-center">
+                          <span className="text-[8px] font-bold text-sky-400 uppercase tracking-widest">{res.locusHandle}</span>
+                          <span className="text-[8px] text-[#00ff41] font-mono">{(res.score * 100).toFixed(1)}% MATCH</span>
+                        </div>
+                        <p className="text-[10px] text-neutral-300 leading-tight italic line-clamp-3">"{res.text}"</p>
+                        <div className="flex items-center gap-1.5 pt-1 border-t border-[#1a1a1a]">
+                          <Database className="w-2 h-2 text-neutral-600" />
+                          <span className="text-[8px] text-neutral-600 font-mono truncate">{res.source}</span>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
               </div>
             )}
           </div>

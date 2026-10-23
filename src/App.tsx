@@ -2288,6 +2288,8 @@ export default function App() {
             onSaveSnapshot={handleSaveSnapshot}
             onApplySnapshot={handleApplySnapshot}
             onDeleteSnapshot={handleDeleteSnapshot}
+            lastRunResults={lastRunResults}
+            lastImportResults={lastImportResults}
           />
         </main>
       ) : activeNavTab === 'graph-view' ? (
