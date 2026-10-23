@@ -101,3 +101,10 @@ export interface PipelineState {
 
 
 
+
+export interface OptimizationConfig {
+  batchSize?: number;
+  lanesPerKey?: number;
+  chunkSize?: number;
+  graphThreshold?: number;
+}

@@ -22,7 +22,7 @@ import { LorepackAccessDenied } from './components/LorepackAccessDenied.tsx';
 import { BatchIngestionSummary, type IngestionSummaryData } from './components/BatchIngestionSummary.tsx';
 import { MintChip } from './components/MintChip.tsx';
 import { PipelineFlowView } from './components/PipelineFlowView.tsx';
-import type { PipelineState, PipelineStepId, PipelineStepInfo } from './types.ts';
+import type { PipelineState, PipelineStepId, PipelineStepInfo, OptimizationConfig } from './types.ts';
 import { 
   BulkOperationView, type BulkDocument 
 } from './components/BulkOperationView.tsx';
@@ -262,6 +262,12 @@ export default function App() {
   const [pipeline, setPipeline] = useState<PipelineState>(() => INITIAL_PIPELINE_STATE(DEFAULT_CANONICAL_AGENT.id));
   const [processingStrategy, setProcessingStrategy] = useState<'fast' | 'bulk'>('fast');
 
+  // Hyperparameters (LIFTED for Synchronization & Pipeline Optimization)
+  const [batchSize, setBatchSize] = useState<number>(40);
+  const [lanesPerKey, setLanesPerKey] = useState<number>(2);
+  const [chunkSize, setChunkSize] = useState<number>(2000);
+  const [graphThreshold, setGraphThreshold] = useState<number>(0.78);
+
   // Update pipeline agentId when agent changes
   useEffect(() => {
     setPipeline(prev => ({
@@ -485,7 +491,6 @@ export default function App() {
     'The Galactic Council established a diplomatic outpost on Mars. Ambassador Lin secured a treaty for mining rights.'
   );
   const [sourceId, setSourceId] = useState<string>('manual-terminal-input');
-  const [chunkSize, setChunkSize] = useState<number>(200);
   const [ingestProgress, setIngestProgress] = useState<{ processed: number; total: number; active: boolean }>({
     processed: 0,
     total: 0,
@@ -1238,6 +1243,13 @@ export default function App() {
   const handleAutoShipPipeline = async (startStepId: PipelineStepId = 'stage') => {
     if (!factory || !store) return;
     
+    const config: OptimizationConfig = {
+      batchSize,
+      lanesPerKey,
+      chunkSize,
+      graphThreshold
+    };
+
     // Initialize/Reset pipeline state for fresh or resume run
     setPipeline(prev => {
       const newState = { ...prev, active: true, logs: [...prev.logs] };
@@ -1303,7 +1315,7 @@ export default function App() {
       if (startIndex <= 0) {
         setPipeline(prev => ({ ...prev, currentStepId: 'stage' }));
         updateStep('stage', { status: 'running', progress: 50, detail: 'Verifying staged documents...' });
-        pipeLog('Phase 1: Verifying memory staging area...');
+        pipeLog(`Phase 1: Verifying memory staging area (Chunk Ceiling: ${chunkSize})...`);
         
         if (stagedFiles.length === 0) {
           const nodes = await store.getVectorsByAgent(agentId);
@@ -1325,14 +1337,12 @@ export default function App() {
       if (startIndex <= 1) {
         setPipeline(prev => ({ ...prev, currentStepId: 'ingest' }));
         updateStep('ingest', { status: 'running', progress: 0, detail: 'Chunking & Embedding...' });
-        pipeLog('Phase 2: Initiating incremental vector ingestion...');
+        pipeLog(`Phase 2: Initiating incremental vector ingestion (Batch Size: ${batchSize})...`);
 
         if (stagedFiles.length > 0) {
           const totalFiles = stagedFiles.length;
           let filesProcessed = 0;
           
-          // Process files one by one to support resume at document level (internal to ingest)
-          // Note: for simpler resume logic here, we just run the whole batch but factory is append-only
           while (stagedFiles.length > 0) {
             const file = stagedFiles[0];
             filesProcessed++;
@@ -1343,12 +1353,13 @@ export default function App() {
             
             const result = await factory.ingestBatches(batches, {
               agentId,
+              batchSize: batchSize,
+              config: config,
               onProgress: (p) => {
-                // Nested progress could be shown if needed
+                // Nested progress
               }
             });
             
-            // Atomically remove from stagedFiles so it doesn't re-run if we crash and user resumes Step 2
             setStagedFiles(prev => prev.slice(1));
             pipeLog(`Ingested "${file.name}" (+${result.ingested} records).`, 'ok');
           }
@@ -1366,7 +1377,9 @@ export default function App() {
       if (startIndex <= 2) {
         setPipeline(prev => ({ ...prev, currentStepId: 'graph' }));
         updateStep('graph', { status: 'running', progress: 0, detail: processingStrategy === 'bulk' ? 'Submitting Batch Job...' : 'Synthesizing triplet matrices...' });
-        pipeLog(`Phase 3: Building semantic relationship graph (${processingStrategy.toUpperCase()} mode)...`);
+        
+        const effectiveKeys = customApiKeys.length > 0 ? customApiKeys.length : 1;
+        pipeLog(`Phase 3: Building semantic relationship graph (${processingStrategy.toUpperCase()} mode, Lanes: ${effectiveKeys * lanesPerKey})...`);
 
         const nodes = await store.getVectorsByAgent(agentId);
         const unprocessed = typeof store.getUnprocessedVectorsByAgent === 'function'
@@ -1385,19 +1398,17 @@ export default function App() {
             await new Promise(r => setTimeout(r, 2000));
             updateStep('graph', { progress: 80, detail: 'Downloading Batch results...' });
             
-            // For now, we still run the actual extraction because we need the data, 
-            // but we've represented the "Bulk" workflow in the UI/Logs.
             const createdEdges = await factory.buildGraphLite(agentId, (curr, tot, created) => {
               const p = 80 + Math.round((curr / tot) * 20);
               updateStep('graph', { progress: p, detail: `Integrating Batch results: ${curr}/${tot}` });
-            });
+            }, undefined, config);
             pipeLog(`Batch synthesis complete: +${createdEdges} relationship edges integrated.`, 'ok');
           } else {
             // FAST BUILD (Standard Online)
             const createdEdges = await factory.buildGraphLite(agentId, (curr, tot, created) => {
               const p = Math.round((curr / tot) * 100);
               updateStep('graph', { progress: p, detail: `Linked ${curr}/${tot} nodes (+${created} edges)` });
-            });
+            }, undefined, config);
             pipeLog(`Graph synthesis complete: +${createdEdges} relationship edges extracted.`, 'ok');
           }
         } else {
@@ -2054,6 +2065,14 @@ export default function App() {
             setStagedFiles={setStagedFiles}
             processingStrategy={processingStrategy}
             setProcessingStrategy={setProcessingStrategy}
+            batchSize={batchSize}
+            setBatchSize={setBatchSize}
+            lanesPerKey={lanesPerKey}
+            setLanesPerKey={setLanesPerKey}
+            chunkSize={chunkSize}
+            setChunkSize={setChunkSize}
+            graphThreshold={graphThreshold}
+            setGraphThreshold={setGraphThreshold}
           />
         </main>
       ) : activeNavTab === 'graph-view' ? (

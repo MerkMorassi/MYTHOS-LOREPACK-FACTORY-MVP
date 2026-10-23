@@ -4,6 +4,7 @@ import type {
   TripletEdge,
   VectorRecord,
   ExportProgress,
+  OptimizationConfig,
 } from './types.js';
 import { InMemoryLorepackStore, LorepackReader, isValidVector } from './reader.js';
 import {
@@ -243,6 +244,7 @@ export class LorepackPacker {
       signal?: AbortSignal;
       batchSize?: number;
       embeddingModel?: string;
+      config?: OptimizationConfig;
     }
   ): Promise<{ ingested: number; failed: Array<{ text: string; reason: string }> }> {
     const failed: Array<{ text: string; reason: string }> = [];
@@ -441,7 +443,8 @@ export class LorepackPacker {
   async buildGraph(
     agentId: string,
     onProgress?: (current: number, total: number, created: number) => void,
-    modelName = 'gemini-3.6-flash'
+    modelName = 'gemini-3.6-flash',
+    config?: OptimizationConfig
   ): Promise<number> {
     const allNodes = await this.store.getVectorsByAgent(agentId);
 
@@ -476,7 +479,14 @@ export class LorepackPacker {
       return 0;
     }
 
-    const batchSize = 5;
+    // Calculate concurrency: numKeys * lanesPerKey
+    let numKeys = 1;
+    if (this.model && (this.model as any).apiKeys) {
+      numKeys = Math.max(1, (this.model as any).apiKeys.length);
+    }
+    const lanes = (config as any)?.lanesPerKey || 1;
+    const batchSize = numKeys * lanes;
+
     let created = 0;
     let completedCount = allNodes.length - uncompletedNodes.length;
 
@@ -543,9 +553,10 @@ export class LorepackPacker {
   async buildGraphLite(
     agentId: string,
     onProgress?: (current: number, total: number, created: number) => void,
-    modelName = 'gemini-3.6-flash'
+    modelName = 'gemini-3.6-flash',
+    config?: OptimizationConfig
   ): Promise<number> {
-    return this.buildGraph(agentId, onProgress, modelName);
+    return this.buildGraph(agentId, onProgress, modelName, config);
   }
 
   // ------------------------------------------------------------

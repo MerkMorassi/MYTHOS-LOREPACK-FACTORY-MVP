@@ -5,6 +5,7 @@ import type {
   LorepackStore,
   TripletEdge,
   VectorRecord,
+  OptimizationConfig,
 } from './types.js';
 import { LorepackPacker, type PackageTestResult } from './packer.js';
 import {
@@ -97,6 +98,7 @@ export class LorepackFactory {
       signal?: AbortSignal;
       batchSize?: number;
       embeddingModel?: string;
+      config?: OptimizationConfig;
     }
   ): Promise<{ ingested: number; failed: Array<{ text: string; reason: string }> }> {
     return this.packer.ingestBatches(batches, options);
@@ -114,17 +116,19 @@ export class LorepackFactory {
   async buildGraph(
     agentId: string,
     onProgress?: (current: number, total: number, created: number) => void,
-    modelName?: string
+    modelName?: string,
+    config?: OptimizationConfig
   ): Promise<number> {
-    return this.packer.buildGraph(agentId, onProgress, modelName);
+    return this.packer.buildGraph(agentId, onProgress, modelName, config);
   }
 
   async buildGraphLite(
     agentId: string,
     onProgress?: (current: number, total: number, created: number) => void,
-    modelName?: string
+    modelName?: string,
+    config?: OptimizationConfig
   ): Promise<number> {
-    return this.packer.buildGraphLite(agentId, onProgress, modelName);
+    return this.packer.buildGraphLite(agentId, onProgress, modelName, config);
   }
 
   yieldExportBatches(agentId: string, batchSize = 1000): AsyncGenerator<object[]> {

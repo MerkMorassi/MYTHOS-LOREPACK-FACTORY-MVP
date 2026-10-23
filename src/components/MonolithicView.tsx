@@ -43,6 +43,14 @@ interface MonolithicViewProps {
   setStagedFiles: React.Dispatch<React.SetStateAction<{ name: string; size: number; text: string }[]>>;
   processingStrategy: 'fast' | 'bulk';
   setProcessingStrategy: (strategy: 'fast' | 'bulk') => void;
+  batchSize: number;
+  setBatchSize: (val: number) => void;
+  lanesPerKey: number;
+  setLanesPerKey: (val: number) => void;
+  chunkSize: number;
+  setChunkSize: (val: number) => void;
+  graphThreshold: number;
+  setGraphThreshold: (val: number) => void;
 }
 
 // Model Health Indicator
@@ -109,6 +117,14 @@ export const MonolithicView: React.FC<MonolithicViewProps> = ({
   setStagedFiles,
   processingStrategy,
   setProcessingStrategy,
+  batchSize,
+  setBatchSize,
+  lanesPerKey,
+  setLanesPerKey,
+  chunkSize,
+  setChunkSize,
+  graphThreshold,
+  setGraphThreshold,
 }) => {
   // Current active canonical agent
   const activeAgent = getCanonicalAgentById(agentId) || CANONICAL_MYTHOS_AGENTS[0];
@@ -240,10 +256,6 @@ export const MonolithicView: React.FC<MonolithicViewProps> = ({
     ...SUPPORTED_EMBEDDING_MODELS,
   ]);
   const [fetchingEmbeddingModels, setFetchingEmbeddingModels] = useState<boolean>(false);
-  const [batchSize, setBatchSize] = useState<number>(40);
-  const [lanesPerKey, setLanesPerKey] = useState<number>(2);
-  const [chunkSize, setChunkSize] = useState<number>(2000);
-  const [graphThreshold, setGraphThreshold] = useState<number>(0.78);
 
   // File Staging
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -486,6 +498,8 @@ export const MonolithicView: React.FC<MonolithicViewProps> = ({
         const result = await factory.ingestBatches(batches, {
           agentId: activeAgent.id,
           embeddingModel,
+          batchSize: batchSize,
+          config: { batchSize, lanesPerKey, chunkSize, graphThreshold },
           onProgress: (p) => {
             setProgress(40 + Math.round((p.processed / Math.max(1, batches.length)) * 50));
           },
@@ -530,6 +544,8 @@ export const MonolithicView: React.FC<MonolithicViewProps> = ({
         const result = await factory.ingestBatches(batches, {
           agentId: activeAgent.id,
           embeddingModel,
+          batchSize: batchSize,
+          config: { batchSize, lanesPerKey, chunkSize, graphThreshold },
         });
 
         totalCreated += result.ingested;
@@ -595,7 +611,8 @@ export const MonolithicView: React.FC<MonolithicViewProps> = ({
           setProgress(Math.round((curr / Math.max(1, tot)) * 100));
           addLog(`Synthesizing edge relationships [${curr}/${tot}]: +${created} edges`, 'SYS', 'sys');
         },
-        generationModel
+        generationModel,
+        { batchSize, lanesPerKey, chunkSize, graphThreshold }
       );
 
       setProgress(100);
@@ -710,7 +727,7 @@ export const MonolithicView: React.FC<MonolithicViewProps> = ({
                     score: factory.cosine(qVec, v.vector),
                   }))
                   .sort((a, b) => b.score - a.score);
-                topHits = scored.slice(0, 3).filter((s) => s.score >= 0.35);
+                topHits = scored.slice(0, 3).filter((s) => s.score >= graphThreshold);
               }
             } catch {
               // Fallback to token matching below
