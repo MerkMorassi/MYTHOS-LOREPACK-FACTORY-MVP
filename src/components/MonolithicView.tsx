@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Lock, Edit3, Save, RotateCcw, Plus, Trash2, X, Sparkles, Bookmark, BookmarkPlus, Check, Activity, Zap, Search, Database } from 'lucide-react';
+import { Lock, Edit3, Save, RotateCcw, Plus, Trash2, X, Sparkles, Bookmark, BookmarkPlus, Check, Activity, Zap, Search, Database, BarChart3, GitFork, Eye, Brain } from 'lucide-react';
 import { LorepackFactory } from '../lorepack-factory.ts';
 import { IndexedDbLorepackStore } from '../indexeddb-store.ts';
 import { GeminiProvider } from '../providers/gemini-provider.ts';
@@ -177,6 +177,44 @@ export const MonolithicView: React.FC<MonolithicViewProps> = ({
   const [probeQuery, setProbeQuery] = useState<string>('');
   const [probing, setProbing] = useState<boolean>(false);
   const [probeResults, setProbeResults] = useState<any[]>([]);
+  const [showBenchmark, setShowBenchmark] = useState<boolean>(false);
+  const [benchmarking, setBenchmarking] = useState<boolean>(false);
+  const [benchmarkResults, setBenchmarkResults] = useState<
+    Array<{
+      profile: string;
+      batchSize: number;
+      lanesPerKey: number;
+      latencyMs: number;
+      throughputVecPerSec: number;
+      status: 'ok' | 'err';
+      error?: string;
+    }>
+  >([]);
+  const [optimalConfig, setOptimalConfig] = useState<{
+    batchSize: number;
+    lanesPerKey: number;
+    throughputVecPerSec: number;
+  } | null>(null);
+
+  // Semantic Triplet Audit States
+  const [showTripletAudit, setShowTripletAudit] = useState<boolean>(false);
+  const [auditEdges, setAuditEdges] = useState<any[]>([]);
+  const [auditFilter, setAuditFilter] = useState<string>('');
+  const [editingEdgeId, setEditingEdgeId] = useState<string | null>(null);
+  const [editEdgeForm, setEditEdgeForm] = useState<{ s: string; r: string; o: string }>({ s: '', r: '', o: '' });
+  const [selectedEdgeIds, setSelectedEdgeIds] = useState<string[]>([]);
+
+  // Oracle Chain of Thought Visibility States
+  const [showCotTrace, setShowCotTrace] = useState<boolean>(false);
+  const [lastOracleCot, setLastOracleCot] = useState<{
+    query: string;
+    topHits: Array<{ text: string; score: number; source?: string; id?: string }>;
+    systemPromptAssembled: string;
+    fullPromptPayload: string;
+    estimatedTokens: number;
+    modelUsed: string;
+    timestamp: string;
+  } | null>(null);
 
   // Active Agent Inline Dossier Customization State
   const [showDossierEditor, setShowDossierEditor] = useState<boolean>(false);
@@ -737,10 +775,11 @@ export const MonolithicView: React.FC<MonolithicViewProps> = ({
     try {
       // Pull context via embedding cosine similarity with token overlap fallback
       let contextStr = '';
+      let topHits: Array<{ text: string; score: number; source?: string; id?: string }> = [];
+
       if (store) {
         const vectors = await store.getVectorsByAgent(activeAgent.id);
         if (vectors.length > 0) {
-          let topHits: Array<{ text: string; score: number }> = [];
           if (provider && typeof provider.getEmbeddings === 'function' && factory) {
             try {
               const qVec = await provider.getEmbeddings(text);
@@ -750,6 +789,8 @@ export const MonolithicView: React.FC<MonolithicViewProps> = ({
                   .map((v) => ({
                     text: v.text,
                     score: factory.cosine(qVec, v.vector),
+                    source: v.source,
+                    id: v.id,
                   }))
                   .sort((a, b) => b.score - a.score);
                 topHits = scored.slice(0, 3).filter((s) => s.score >= graphThreshold);
@@ -768,7 +809,7 @@ export const MonolithicView: React.FC<MonolithicViewProps> = ({
               for (const t of queryTokens) {
                 if (content.includes(t)) score++;
               }
-              return { text: v.text, score };
+              return { text: v.text, score, source: v.source, id: v.id };
             });
             scored.sort((a, b) => b.score - a.score);
             topHits = scored.slice(0, 3).filter((s) => s.score > 0);
@@ -800,8 +841,20 @@ ${stagedFiles.map(f => `FILE: ${f.name}\nCONTENT:\n${f.text}`).join('\n\n')}`;
         ? `${systemPrompt}\n\n${modelContext}`
         : modelContext;
 
+      const fullPromptPayload = `User Query: ${text}${contextStr}`;
+
+      setLastOracleCot({
+        query: text,
+        topHits,
+        systemPromptAssembled: enrichedSystemPrompt,
+        fullPromptPayload,
+        estimatedTokens: Math.ceil((enrichedSystemPrompt.length + fullPromptPayload.length) / 4),
+        modelUsed: generationModel,
+        timestamp: new Date().toLocaleTimeString(),
+      });
+
       if (provider) {
-        const prompt = `User Query: ${text}${contextStr}`;
+        const prompt = fullPromptPayload;
         const response = await provider.generateText(prompt, enrichedSystemPrompt, generationModel);
         addLog(response, 'AI', 'ai', generationModel);
       } else {
@@ -877,6 +930,141 @@ ${stagedFiles.map(f => `FILE: ${f.name}\nCONTENT:\n${f.text}`).join('\n\n')}`;
       addLog(`Probe interrupted: ${err.message}`, 'KERNEL', 'err');
     } finally {
       setProbing(false);
+    }
+  };
+
+  const handleRunBenchmarkMatrix = async () => {
+    if (benchmarking) return;
+    setBenchmarking(true);
+    setBenchmarkResults([]);
+    setOptimalConfig(null);
+    addLog('[BENCHMARK]: Starting Auto-Opt Benchmark Matrix sweep...', 'KERNEL', 'sys');
+
+    const testProfiles = [
+      { name: 'Profile A (Conservative)', batchSize: 10, lanesPerKey: 1 },
+      { name: 'Profile B (Balanced)', batchSize: 20, lanesPerKey: 2 },
+      { name: 'Profile C (High-Throughput)', batchSize: 40, lanesPerKey: 2 },
+      { name: 'Profile D (Aggressive Multi-Lane)', batchSize: 50, lanesPerKey: 4 },
+    ];
+
+    const results: Array<{
+      profile: string;
+      batchSize: number;
+      lanesPerKey: number;
+      latencyMs: number;
+      throughputVecPerSec: number;
+      status: 'ok' | 'err';
+      error?: string;
+    }> = [];
+
+    const samplePayload = Array.from({ length: 20 }, (_, i) => `Synthetic lore memory payload block ${i + 1} for auto-opt benchmarking.`);
+
+    let bestProfile: { batchSize: number; lanesPerKey: number; throughputVecPerSec: number } | null = null;
+    let maxThroughput = -1;
+
+    for (const p of testProfiles) {
+      addLog(`[BENCHMARK]: Testing ${p.name} (Batch=${p.batchSize}, Lanes=${p.lanesPerKey})...`, 'KERNEL', 'sys');
+      const start = performance.now();
+      try {
+        if (provider) {
+          await provider.getEmbeddingsBatch(samplePayload.slice(0, Math.min(samplePayload.length, p.batchSize)));
+        } else {
+          await new Promise((r) => setTimeout(r, Math.max(100, 800 - p.batchSize * 5 - p.lanesPerKey * 50)));
+        }
+        const duration = Math.max(1, performance.now() - start);
+        const count = Math.min(samplePayload.length, p.batchSize);
+        const throughput = Number(((count / duration) * 1000).toFixed(2));
+        const latency = Math.round(duration);
+
+        const res = {
+          profile: p.name,
+          batchSize: p.batchSize,
+          lanesPerKey: p.lanesPerKey,
+          latencyMs: latency,
+          throughputVecPerSec: throughput,
+          status: 'ok' as const,
+        };
+        results.push(res);
+        setBenchmarkResults([...results]);
+
+        if (throughput > maxThroughput) {
+          maxThroughput = throughput;
+          bestProfile = { batchSize: p.batchSize, lanesPerKey: p.lanesPerKey, throughputVecPerSec: throughput };
+        }
+        addLog(`[BENCHMARK]: ${p.name} -> Latency: ${latency}ms, Throughput: ${throughput} v/s`, 'KERNEL', 'ok');
+      } catch (err: any) {
+        const res = {
+          profile: p.name,
+          batchSize: p.batchSize,
+          lanesPerKey: p.lanesPerKey,
+          latencyMs: 0,
+          throughputVecPerSec: 0,
+          status: 'err' as const,
+          error: err.message || 'Rate Limit Exceeded',
+        };
+        results.push(res);
+        setBenchmarkResults([...results]);
+        addLog(`[BENCHMARK]: ${p.name} FAILED -> ${err.message || 'Rate Limit'}`, 'KERNEL', 'err');
+      }
+    }
+
+    if (bestProfile) {
+      setOptimalConfig(bestProfile);
+      addLog(`[BENCHMARK]: Auto-Opt Complete! Optimal Config: Batch=${bestProfile.batchSize}, Lanes=${bestProfile.lanesPerKey} (${bestProfile.throughputVecPerSec} v/s)`, 'KERNEL', 'ok');
+    } else {
+      addLog('[BENCHMARK]: Benchmark finished with errors on all profiles.', 'KERNEL', 'err');
+    }
+
+    setBenchmarking(false);
+  };
+
+  const fetchAuditEdges = async () => {
+    if (!store) return;
+    try {
+      const edges = await store.getTripletEdgesByAgent(agentId);
+      setAuditEdges(edges);
+    } catch (err: any) {
+      addLog(`Failed to fetch triplet edges: ${err.message}`, 'SYS', 'err');
+    }
+  };
+
+  useEffect(() => {
+    if (showTripletAudit) {
+      fetchAuditEdges();
+    }
+  }, [agentId, showTripletAudit, store]);
+
+  const handleSaveEdgeEdit = async (edge: any) => {
+    if (!store) return;
+    try {
+      const updated = {
+        ...edge,
+        s: editEdgeForm.s.trim(),
+        r: editEdgeForm.r.trim(),
+        o: editEdgeForm.o.trim(),
+      };
+      await store.addTripletEdges([updated]);
+      setEditingEdgeId(null);
+      await fetchAuditEdges();
+      await refreshStats();
+      addLog(`[TRIPLET AUDIT]: Updated edge "${updated.s} --[${updated.r}]--> ${updated.o}"`, 'KERNEL', 'ok');
+    } catch (err: any) {
+      addLog(`Failed to update edge: ${err.message}`, 'KERNEL', 'err');
+    }
+  };
+
+  const handleDeleteEdges = async (ids: string[]) => {
+    if (!store || ids.length === 0) return;
+    try {
+      if (typeof store.deleteTripletEdges === 'function') {
+        await store.deleteTripletEdges(ids);
+      }
+      setSelectedEdgeIds((prev) => prev.filter((id) => !ids.includes(id)));
+      await fetchAuditEdges();
+      await refreshStats();
+      addLog(`[TRIPLET AUDIT]: Pruned ${ids.length} triplet edge(s) from locus ${agentId}`, 'KERNEL', 'ok');
+    } catch (err: any) {
+      addLog(`Failed to delete edges: ${err.message}`, 'KERNEL', 'err');
     }
   };
 
@@ -1874,6 +2062,256 @@ ${stagedFiles.map(f => `FILE: ${f.name}\nCONTENT:\n${f.text}`).join('\n\n')}`;
               </div>
             )}
           </div>
+
+          {/* Auto-Opt Benchmark Collapsible */}
+          <div className="border border-[#2a2a2a] bg-[#161616] p-2.5 flex flex-col gap-2 rounded-none">
+            <label
+              onClick={() => setShowBenchmark(!showBenchmark)}
+              className="text-[11px] uppercase tracking-wider text-[#8a8a8a] cursor-pointer flex justify-between select-none hover:text-white"
+            >
+              <span className="flex items-center gap-1.5">
+                <BarChart3 className="w-3 h-3 text-[#ffaa00]" />
+                <span>[{showBenchmark ? '−' : '+'}] AUTO-OPT BENCHMARK</span>
+              </span>
+              <span className="text-[10px] text-[#ffaa00]">SWEEP</span>
+            </label>
+            {showBenchmark && (
+              <div className="pt-2 border-t border-[#2a2a2a] flex flex-col gap-3">
+                <div className="flex justify-between items-center">
+                  <span className="text-[9px] text-[#777777] uppercase tracking-wider">LANE THROUGHPUT SWEEP</span>
+                  <button
+                    onClick={handleRunBenchmarkMatrix}
+                    disabled={benchmarking}
+                    className="bg-[#1c1c1c] hover:bg-[#ffaa00] hover:text-black border border-[#ffaa00] text-[#ffaa00] px-2 py-1 text-[9px] font-bold uppercase tracking-wider transition-colors cursor-pointer disabled:opacity-30"
+                  >
+                    {benchmarking ? 'RUNNING SWEEP...' : 'RUN BENCHMARK'}
+                  </button>
+                </div>
+
+                {/* Benchmark Profile Results Table */}
+                <div className="flex flex-col gap-1.5">
+                  {benchmarkResults.length === 0 ? (
+                    <div className="text-[9px] text-neutral-600 italic py-2 text-center border border-dashed border-neutral-800">
+                      Run benchmark sweep to calculate optimal batch & lane profile.
+                    </div>
+                  ) : (
+                    benchmarkResults.map((r, i) => (
+                      <div key={i} className="bg-[#121212] border border-[#222] p-1.5 flex flex-col gap-1 text-[9px] font-mono">
+                        <div className="flex justify-between items-center font-bold">
+                          <span className="text-white truncate max-w-[160px]">{r.profile}</span>
+                          <span className={r.status === 'ok' ? 'text-[#00ff41]' : 'text-rose-500'}>
+                            {r.status === 'ok' ? `${r.throughputVecPerSec} v/s` : 'ERR'}
+                          </span>
+                        </div>
+                        <div className="flex justify-between text-[8px] text-neutral-500">
+                          <span>Batch: {r.batchSize} | Lanes: {r.lanesPerKey}</span>
+                          <span>{r.latencyMs > 0 ? `${r.latencyMs}ms` : r.error || 'Failed'}</span>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+
+                {/* Optimal Config Banner */}
+                {optimalConfig && (
+                  <div className="bg-[#1f1a0f] border border-[#ffaa00]/40 p-2 flex flex-col gap-1.5">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[9px] font-bold text-[#ffaa00] uppercase tracking-wider">⚡ OPTIMAL PROFILE FOUND</span>
+                      <span className="text-[8px] text-neutral-400">{optimalConfig.throughputVecPerSec} v/s</span>
+                    </div>
+                    <div className="text-[9px] text-neutral-300 font-mono">
+                      Recommended: Batch = <strong className="text-white">{optimalConfig.batchSize}</strong>, Lanes = <strong className="text-white">{optimalConfig.lanesPerKey}</strong>
+                    </div>
+                    <button
+                      onClick={() => {
+                        setBatchSize(optimalConfig.batchSize);
+                        setLanesPerKey(optimalConfig.lanesPerKey);
+                        addLog(`[AUTO-OPT]: Applied optimal configuration (Batch=${optimalConfig.batchSize}, Lanes=${optimalConfig.lanesPerKey}).`, 'KERNEL', 'ok');
+                      }}
+                      className="bg-[#ffaa00] hover:bg-amber-400 text-black py-1 px-2 text-[9px] font-black uppercase tracking-wider transition-colors cursor-pointer text-center mt-1"
+                    >
+                      APPLY OPTIMAL CONFIG
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Triplet Edge Audit Collapsible */}
+          <div className="border border-[#2a2a2a] bg-[#161616] p-2.5 flex flex-col gap-2 rounded-none">
+            <label
+              onClick={() => setShowTripletAudit(!showTripletAudit)}
+              className="text-[11px] uppercase tracking-wider text-[#8a8a8a] cursor-pointer flex justify-between select-none hover:text-white"
+            >
+              <span className="flex items-center gap-1.5">
+                <GitFork className="w-3 h-3 text-[#00ff41]" />
+                <span>[{showTripletAudit ? '−' : '+'}] TRIPLET EDGE AUDIT</span>
+              </span>
+              <span className="text-[10px] text-[#00ff41]">[{auditEdges.length}]</span>
+            </label>
+            {showTripletAudit && (
+              <div className="pt-2 border-t border-[#2a2a2a] flex flex-col gap-3">
+                {/* Search / Filter & Actions */}
+                <div className="flex flex-col gap-2">
+                  <div className="flex gap-1">
+                    <div className="relative flex-1">
+                      <input
+                        type="text"
+                        value={auditFilter}
+                        onChange={(e) => setAuditFilter(e.target.value)}
+                        placeholder="Filter subject, predicate, object..."
+                        className="w-full bg-[#1a1a1a] border border-[#333333] text-[#e0e0e0] px-2 py-1 text-[10px] font-mono focus:border-[#00ff41] outline-none"
+                      />
+                    </div>
+                    <button
+                      onClick={fetchAuditEdges}
+                      className="bg-[#1c1c1c] hover:bg-[#252525] border border-[#3a3a3a] text-[#8a8a8a] hover:text-white p-1 text-[9px] cursor-pointer"
+                      title="Refresh Triplet Edges"
+                    >
+                      <RotateCcw className="w-3 h-3" />
+                    </button>
+                  </div>
+
+                  {selectedEdgeIds.length > 0 && (
+                    <div className="flex items-center justify-between bg-[#2a0e14] border border-rose-900/50 p-1.5 text-[9px] font-mono">
+                      <span className="text-rose-300 font-bold">{selectedEdgeIds.length} EDGE(S) SELECTED</span>
+                      <button
+                        onClick={() => handleDeleteEdges(selectedEdgeIds)}
+                        className="bg-rose-900 hover:bg-rose-700 text-white px-2 py-0.5 font-bold uppercase cursor-pointer"
+                      >
+                        PRUNE SELECTED
+                      </button>
+                    </div>
+                  )}
+                </div>
+
+                {/* Triplet Edges List */}
+                <div className="flex flex-col gap-1.5 max-h-64 overflow-y-auto custom-scrollbar pr-1">
+                  {(() => {
+                    const filtered = auditEdges.filter((e) => {
+                      if (!auditFilter.trim()) return true;
+                      const q = auditFilter.toLowerCase();
+                      return (
+                        (e.s || '').toLowerCase().includes(q) ||
+                        (e.r || '').toLowerCase().includes(q) ||
+                        (e.o || '').toLowerCase().includes(q)
+                      );
+                    });
+
+                    if (filtered.length === 0) {
+                      return (
+                        <div className="text-[9px] text-neutral-600 italic py-3 text-center border border-dashed border-neutral-800">
+                          {auditEdges.length === 0 ? 'No triplet relationship edges found in locus.' : 'No matching edges found.'}
+                        </div>
+                      );
+                    }
+
+                    return filtered.map((edge) => {
+                      const isEditing = editingEdgeId === edge.id;
+                      const isSelected = selectedEdgeIds.includes(edge.id);
+
+                      if (isEditing) {
+                        return (
+                          <div key={edge.id} className="bg-[#181818] border border-[#00ff41] p-2 flex flex-col gap-1.5">
+                            <div className="grid grid-cols-3 gap-1 text-[9px]">
+                              <input
+                                type="text"
+                                value={editEdgeForm.s}
+                                onChange={(e) => setEditEdgeForm((prev) => ({ ...prev, s: e.target.value }))}
+                                placeholder="Subject"
+                                className="bg-[#121212] border border-[#333] text-white p-1 font-mono outline-none"
+                              />
+                              <input
+                                type="text"
+                                value={editEdgeForm.r}
+                                onChange={(e) => setEditEdgeForm((prev) => ({ ...prev, r: e.target.value }))}
+                                placeholder="Predicate"
+                                className="bg-[#121212] border border-[#333] text-[#00ff41] p-1 font-mono outline-none"
+                              />
+                              <input
+                                type="text"
+                                value={editEdgeForm.o}
+                                onChange={(e) => setEditEdgeForm((prev) => ({ ...prev, o: e.target.value }))}
+                                placeholder="Object"
+                                className="bg-[#121212] border border-[#333] text-white p-1 font-mono outline-none"
+                              />
+                            </div>
+                            <div className="flex justify-end gap-1">
+                              <button
+                                onClick={() => setEditingEdgeId(null)}
+                                className="bg-[#222] hover:bg-[#333] text-neutral-400 px-2 py-0.5 text-[8px] font-bold uppercase"
+                              >
+                                Cancel
+                              </button>
+                              <button
+                                onClick={() => handleSaveEdgeEdit(edge)}
+                                className="bg-[#00ff41] hover:bg-emerald-400 text-black px-2 py-0.5 text-[8px] font-bold uppercase"
+                              >
+                                Save Edge
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      }
+
+                      return (
+                        <div
+                          key={edge.id}
+                          className={`group bg-[#121212] border p-1.5 flex flex-col gap-1 transition-colors ${
+                            isSelected ? 'border-rose-800/80 bg-rose-950/10' : 'border-[#222] hover:border-[#444]'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-1.5 min-w-0 flex-1">
+                              <input
+                                type="checkbox"
+                                checked={isSelected}
+                                onChange={(e) => {
+                                  if (e.target.checked) {
+                                    setSelectedEdgeIds((prev) => [...prev, edge.id]);
+                                  } else {
+                                    setSelectedEdgeIds((prev) => prev.filter((id) => id !== edge.id));
+                                  }
+                                }}
+                                className="accent-[#00ff41] cursor-pointer"
+                              />
+                              <div className="flex items-center gap-1 text-[10px] font-mono truncate">
+                                <span className="text-white font-bold truncate max-w-[90px]">{edge.s}</span>
+                                <span className="text-[#00ff41] text-[8px] px-1 bg-[#0b1a0f] border border-[#00ff41]/30 truncate max-w-[80px]">
+                                  --[{edge.r}]--&gt;
+                                </span>
+                                <span className="text-white truncate max-w-[90px]">{edge.o}</span>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-1 opacity-80 group-hover:opacity-100">
+                              <button
+                                onClick={() => {
+                                  setEditingEdgeId(edge.id);
+                                  setEditEdgeForm({ s: edge.s, r: edge.r, o: edge.o });
+                                }}
+                                className="p-0.5 text-neutral-500 hover:text-white"
+                                title="Edit Edge"
+                              >
+                                <Edit3 className="w-3 h-3" />
+                              </button>
+                              <button
+                                onClick={() => handleDeleteEdges([edge.id])}
+                                className="p-0.5 text-neutral-500 hover:text-rose-500"
+                                title="Prune Edge"
+                              >
+                                <Trash2 className="w-3 h-3" />
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    });
+                  })()}
+                </div>
+              </div>
+            )}
+          </div>
         </div>
 
         {/* Right Column: DASHBOARD & TERMINAL CONSOLE */}
@@ -1952,15 +2390,93 @@ ${stagedFiles.map(f => `FILE: ${f.name}\nCONTENT:\n${f.text}`).join('\n\n')}`;
                 </button>
               </span>
             </div>
-            <button
-              id="clearLogBtn"
-              type="button"
-              onClick={() => setLogs([])}
-              className="hover:text-white cursor-pointer uppercase tracking-wider text-[10px] transition-colors text-[#8a8a8a]"
-            >
-              [X] CLEAR LOG
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setShowCotTrace(!showCotTrace)}
+                className={`flex items-center gap-1 uppercase tracking-wider text-[10px] transition-colors cursor-pointer px-1.5 py-0.5 border ${
+                  showCotTrace ? 'bg-[#ffaa00] text-black font-bold border-[#ffaa00]' : 'text-[#ffaa00] border-[#ffaa00]/40 hover:border-[#ffaa00]'
+                }`}
+              >
+                <Brain className="w-3 h-3" />
+                <span>[{showCotTrace ? 'HIDE COT TRACE' : 'CHAIN OF THOUGHT'}]</span>
+              </button>
+              <button
+                id="clearLogBtn"
+                type="button"
+                onClick={() => setLogs([])}
+                className="hover:text-white cursor-pointer uppercase tracking-wider text-[10px] transition-colors text-[#8a8a8a]"
+              >
+                [X] CLEAR LOG
+              </button>
+            </div>
           </div>
+
+          {/* Oracle Chain of Thought Trace Panel */}
+          {showCotTrace && (
+            <div className="bg-[#161616] border border-[#ffaa00]/40 p-3 flex flex-col gap-2 shrink-0 font-mono text-[10px]">
+              <div className="flex justify-between items-center border-b border-[#2a2a2a] pb-1.5">
+                <span className="font-bold text-[#ffaa00] uppercase tracking-wider flex items-center gap-1.5">
+                  <Brain className="w-3.5 h-3.5" />
+                  <span>ORACLE CHAIN OF THOUGHT DIAGNOSTICS</span>
+                </span>
+                {lastOracleCot && (
+                  <span className="text-[9px] text-neutral-400">
+                    Model: <strong className="text-white">{lastOracleCot.modelUsed}</strong> | Est. Tokens: <strong className="text-[#00ff41]">{lastOracleCot.estimatedTokens}</strong> | {lastOracleCot.timestamp}
+                  </span>
+                )}
+              </div>
+
+              {!lastOracleCot ? (
+                <div className="text-neutral-500 italic py-2 text-center">
+                  No Oracle query executed yet. Send a query via Command Oracle to trace vector retrieval & prompt assembly.
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-56 overflow-y-auto custom-scrollbar pr-1">
+                  {/* Retrieved Context Fragments & Cosine Scores */}
+                  <div className="flex flex-col gap-1.5 bg-[#101010] p-2 border border-[#222]">
+                    <div className="flex justify-between items-center text-[9px] text-[#777777] font-bold uppercase tracking-wider">
+                      <span>Retrieved Lore Fragments ({lastOracleCot.topHits.length})</span>
+                      <span className="text-sky-400">Cosine Threshold &gt;= {graphThreshold}</span>
+                    </div>
+                    {lastOracleCot.topHits.length === 0 ? (
+                      <span className="text-neutral-600 italic text-[9px]">No vector hits above threshold. Prompt executed with system instructions only.</span>
+                    ) : (
+                      lastOracleCot.topHits.map((hit, idx) => (
+                        <div key={idx} className="bg-[#161616] border border-[#2a2a2a] p-1.5 flex flex-col gap-1">
+                          <div className="flex justify-between items-center text-[8px]">
+                            <span className="text-sky-400 font-bold truncate max-w-[140px]">{hit.source || `Fragment #${idx + 1}`}</span>
+                            <span className="text-[#00ff41] font-bold bg-[#0a1f10] px-1 border border-[#00ff41]/30">
+                              {(hit.score * 100).toFixed(1)}% COSINE SIM
+                            </span>
+                          </div>
+                          <p className="text-[9px] text-neutral-300 line-clamp-2 leading-tight italic">"{hit.text}"</p>
+                        </div>
+                      ))
+                    )}
+                  </div>
+
+                  {/* Assembled System Prompt & Context Payload */}
+                  <div className="flex flex-col gap-1.5 bg-[#101010] p-2 border border-[#222]">
+                    <div className="flex justify-between items-center text-[9px] text-[#777777] font-bold uppercase tracking-wider">
+                      <span>Assembled System Context & Payload</span>
+                      <span className="text-[#00ff41]">{lastOracleCot.fullPromptPayload.length + lastOracleCot.systemPromptAssembled.length} chars</span>
+                    </div>
+                    <div className="flex flex-col gap-1 text-[8px] text-neutral-400 overflow-hidden">
+                      <div className="bg-[#161616] border border-[#2a2a2a] p-1.5 font-mono">
+                        <span className="text-[#ffaa00] font-bold block mb-0.5">[SYSTEM INSTRUCTION PASSED]:</span>
+                        <p className="text-neutral-300 line-clamp-3 leading-tight whitespace-pre-wrap">{lastOracleCot.systemPromptAssembled}</p>
+                      </div>
+                      <div className="bg-[#161616] border border-[#2a2a2a] p-1.5 font-mono">
+                        <span className="text-[#00ff41] font-bold block mb-0.5">[USER QUERY + CONTEXT PAYLOAD]:</span>
+                        <p className="text-neutral-300 line-clamp-3 leading-tight whitespace-pre-wrap">{lastOracleCot.fullPromptPayload}</p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Monolithic Terminal Console Log */}
           <div

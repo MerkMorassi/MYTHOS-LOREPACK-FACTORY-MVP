@@ -64,6 +64,20 @@ export class IndexedDbLorepackStore implements LorepackStore {
     await this.writeMany(EDGE_STORE, edges);
   }
 
+  async deleteTripletEdges(ids: string[]): Promise<void> {
+    if (ids.length === 0) return;
+    const database = await this.open();
+    return new Promise<void>((resolve, reject) => {
+      const transaction = database.transaction(EDGE_STORE, 'readwrite');
+      const store = transaction.objectStore(EDGE_STORE);
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(transaction.error);
+      for (const id of ids) {
+        store.delete(id);
+      }
+    });
+  }
+
   async getTripletEdgesByAgent(agentId: string): Promise<TripletEdge[]> {
     return this.readByAgent<TripletEdge>(EDGE_STORE, agentId.toUpperCase());
   }

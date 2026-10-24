@@ -46,6 +46,7 @@ export interface LorepackStore {
   getUnprocessedVectorsByAgent?(agentId: string): Promise<VectorRecord[]>;
   updateVectorProcessingStatus?(ids: string[], status: 'pending' | 'processing' | 'completed' | 'error'): Promise<void>;
   addTripletEdges(edges: TripletEdge[]): Promise<void>;
+  deleteTripletEdges?(ids: string[]): Promise<void>;
   getTripletEdgesByAgent(agentId: string): Promise<TripletEdge[]>;
   getAllTripletEdges(): Promise<TripletEdge[]>;
   addRecordsAtomic(vectors: VectorRecord[], edges: TripletEdge[]): Promise<void>;
