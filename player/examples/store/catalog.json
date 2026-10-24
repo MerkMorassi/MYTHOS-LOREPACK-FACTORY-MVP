@@ -1,0 +1,19 @@
+{
+ "schema": "lorepack-store/catalog@0.1",
+ "updated": "2026-10-24T03:24:00.570Z",
+ "store_id": "home",
+ "packs": [
+  {
+   "tag": "SYS.AI.MAYA.SESAME",
+   "agent": "MAYA",
+   "head": "4f2dd883d464e9e26e6b11896a14109522baf35616ac3eed75f7fb67b19956c8",
+   "seq": 1
+  },
+  {
+   "tag": "SYS.AI.BARBELO.FACTORY",
+   "agent": "BARBELO",
+   "head": "dff229f3fb4ca80e41676047b7aecac522b217d4aa4649608086506a903a5ada",
+   "seq": 1
+  }
+ ]
+}

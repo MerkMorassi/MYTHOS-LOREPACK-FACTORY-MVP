@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mythos.local/schemas/SYS.AI.MAYA.SESAME/store.schema.json",
+  "title": "Central lorepack store files",
+  "description": "Files in the factory's lorepacks/ store: catalog.json (whole store), <TAG>/pack.json (one pack), <TAG>/ingest/ledger.jsonl (one line per ingested source), <TAG>/log/events.jsonl (throttled events). Version files themselves are lorepack.gz records (lorepack-record.schema.json).",
+  "oneOf": [ { "$ref": "#/$defs/catalog" }, { "$ref": "#/$defs/pack_descriptor" }, { "$ref": "#/$defs/ledger_line" }, { "$ref": "#/$defs/event_line" } ],
+  "$defs": {
+    "sha": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "tag": { "type": "string", "pattern": "^SYS\\.AI\\.[A-Z0-9_]+\\.[A-Z0-9_.]+$" },
+    "catalog": {
+      "type": "object", "required": ["schema", "updated", "packs"],
+      "properties": {
+        "schema": { "const": "lorepack-store/catalog@0.1" },
+        "updated": { "type": "string" },
+        "store_id": { "type": "string", "description": "Which store wrote this copy (home, field-ipad, cloud)." },
+        "packs": { "type": "array", "items": { "type": "object", "required": ["tag", "head", "seq"], "properties": { "tag": { "$ref": "#/$defs/tag" }, "agent": { "type": "string" }, "head": { "$ref": "#/$defs/sha" }, "seq": { "type": "integer" }, "etag": { "type": "string" } } } }
+      }
+    },
+    "pack_descriptor": {
+      "type": "object", "required": ["schema", "tag", "agent", "space", "head", "versions", "exposure"],
+      "properties": {
+        "schema": { "const": "lorepack-store/pack@0.1" },
+        "tag": { "$ref": "#/$defs/tag" },
+        "agent": { "type": "object", "required": ["id"], "properties": { "id": { "type": "string" }, "order": { "type": "integer" }, "port": { "type": "integer" }, "agent_number": { "type": "string", "description": "Merk's agent number, zero-padded to 3 digits: roster order (Maya = 015).", "pattern": "^[0-9]{3}$" } } },
+        "space": { "type": "object", "required": ["model", "dim"], "description": "The single embedding space, pinned. Changing it means a new pack lineage (re-embed everything), never a mixed pack.", "properties": { "model": { "type": "string" }, "dim": { "type": "integer" }, "epoch": { "type": "string" } } },
+        "writers": { "type": "array", "items": { "type": "string" }, "description": "Who may mint versions: the owner agent, plus MERKOS. Everyone else mirrors read-only." },
+        "head": { "$ref": "#/$defs/sha" },
+        "versions": { "type": "array", "items": { "type": "object", "required": ["seq", "version", "file", "body_sha256", "segment", "parents"], "properties": { "seq": { "type": "integer" }, "version": { "$ref": "#/$defs/sha" }, "file": { "type": "string" }, "body_sha256": { "$ref": "#/$defs/sha" }, "segment": { "enum": ["full", "append"] }, "parents": { "type": "array", "items": { "$ref": "#/$defs/sha" } }, "counts": { "type": "object" }, "verified": { "type": "string", "description": "Path of the checks JSONL for this version." }, "minted_at": { "type": "string" }, "minted_by": { "type": "string" } } } },
+        "exposure": { "$ref": "#/$defs/exposure" }
+      }
+    },
+    "exposure": {
+      "type": "object", "required": ["default", "rules"],
+      "description": "Owner's sovereignty policy. First matching rule wins. The caller's roster lore_policy.read is applied on top: read self = no cross-pack reads; read without all = never sees visibility self.",
+      "properties": {
+        "default": { "enum": ["deny", "allow"] },
+        "default_visibility": { "enum": ["self", "global", "public"], "default": "self" },
+        "reveal_hidden_count": { "type": "boolean", "default": true },
+        "rules": { "type": "array", "items": { "type": "object", "required": ["callers", "ops"], "properties": { "callers": { "type": "array", "items": { "type": "string" }, "description": "Roster ids, 'roster' (any registered agent) or '*'." }, "ops": { "oneOf": [ { "const": "*" }, { "type": "array", "items": { "type": "string" } } ] }, "visibility": { "type": "array", "items": { "enum": ["self", "global", "public"] } }, "effect": { "enum": ["allow", "deny"], "default": "allow" } } } }
+      }
+    },
+    "ledger_line": {
+      "type": "object", "required": ["kind", "source", "source_sha256", "ts"],
+      "properties": { "kind": { "const": "ingest" }, "source": { "type": "string" }, "source_sha256": { "$ref": "#/$defs/sha" }, "chunks_new": { "type": "integer" }, "chunks_known": { "type": "integer" }, "embed_calls": { "type": "integer" }, "extract_calls": { "type": "integer" }, "version": { "type": "string", "description": "Version the new chunks landed in." }, "ts": { "type": "string" } }
+    },
+    "event_line": {
+      "type": "object", "required": ["kind", "ts"],
+      "properties": { "kind": { "enum": ["progress", "mint", "verify", "sync", "error"] }, "done": { "type": "integer" }, "total": { "type": "integer" }, "msg": { "type": "string" }, "ts": { "type": "string" } }
+    }
+  }
+}

@@ -1,0 +1,186 @@
+<!doctype html>
+<!-- SYS.AI.MAYA.SESAME - Lorepack Inspector (HITL). One file, plain HTML/CSS/vanilla JS, no build needed to run.
+     The reader is inlined below at the READER marker by tools/inline.mjs; inspector.html in this folder is the inlined file.
+     It reads packs only. It never writes, sends or deletes. Gemini key (optional, for text search) stays in memory. -->
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Lorepack Inspector</title>
+<style>
+:root{--fg:#111;--bg:#fff;--mut:#666;--line:#ccc;--pass:#0a0;--fail:#c00;--warn:#b60;--mono:ui-monospace,Menlo,Consolas,monospace}
+*{box-sizing:border-box}body{margin:0;font:14px/1.4 system-ui,sans-serif;color:var(--fg);background:var(--bg)}
+header{display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:8px;border-bottom:1px solid var(--line)}
+header b{margin-right:8px}main{display:grid;grid-template-columns:240px 1fr;min-height:calc(100vh - 50px)}
+aside{border-right:1px solid var(--line);padding:8px;overflow:auto}section{padding:8px;overflow:auto}
+nav button{margin-right:4px}button,select,input,textarea{font:inherit}textarea{width:100%;font-family:var(--mono);font-size:12px}
+pre{font-family:var(--mono);font-size:12px;white-space:pre-wrap;word-break:break-word;background:#f6f6f6;padding:6px;margin:4px 0;max-height:60vh;overflow:auto}
+table{border-collapse:collapse;width:100%;font-size:12px}td,th{border-bottom:1px solid var(--line);padding:3px 4px;text-align:left;vertical-align:top}
+tr.click:hover{background:#eef;cursor:pointer}.pass{color:var(--pass)}.fail{color:var(--fail);font-weight:bold}.warn{color:var(--warn)}.skip{color:var(--mut)}
+.mut{color:var(--mut)}.pack{padding:4px;border:1px solid var(--line);margin-bottom:4px;cursor:pointer}.pack.on{border-color:#000}
+.row{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin:4px 0}label{font-size:12px}.hide{display:none}
+body.machine .human{display:none}body:not(.machine) .machine-only{display:none}
+@media (max-width:700px){main{grid-template-columns:1fr}aside{border-right:0;border-bottom:1px solid var(--line)}}
+</style></head>
+<body>
+<header>
+  <b>Lorepack Inspector</b>
+  <input type="file" id="file" multiple accept=".gz,.jsonl,.lorepack" data-agent-field="pack_files">
+  <input id="url" placeholder="store URL or path" size="28" data-agent-field="pack_url"><button id="loadUrl" data-agent-op="pack_load">Load URL</button>
+  <input id="key" type="password" placeholder="Gemini key (optional, memory only)" size="24" data-agent-field="embed_key">
+  <label><input type="checkbox" id="machine" data-agent-field="machine_mode"> machine mode</label>
+  <span id="status" class="mut" data-agent-result="status"></span>
+</header>
+<main>
+<aside><div class="mut">Packs</div><div id="packs" data-agent-result="packs"></div>
+  <div class="mut" style="margin-top:12px">Session log</div>
+  <div class="row"><button id="dlLog" data-agent-op="session_download">Download JSONL</button><span id="logN" class="mut">0</span></div></aside>
+<section>
+  <nav><button data-tab="verify">Verify</button><button data-tab="records">Records</button><button data-tab="query">Query</button><button data-tab="graph">Graph</button><button data-tab="sources">Sources</button><button data-tab="stats">Stats</button></nav>
+  <div id="tab-verify" class="tab">
+    <div class="row"><button id="runVerify" data-agent-op="pack_verify">Run checks</button><label><input type="checkbox" id="strict"> strict</label><button id="dlVerify">Download checks JSONL</button><span id="vsum" data-agent-result="verify_summary"></span></div>
+    <table class="human"><thead><tr><th>status</th><th>check</th><th>name</th><th>detail</th></tr></thead><tbody id="vrows"></tbody></table>
+    <pre id="vraw" class="machine-only"></pre>
+  </div>
+  <div id="tab-records" class="tab hide">
+    <div class="row"><select id="rtype"><option value="vector">vectors</option><option value="edge">edges</option></select>
+      <input id="rfilter" placeholder="filter (substring)" size="24"><button id="rprev">&lt;</button><span id="rpage"></span><button id="rnext">&gt;</button></div>
+    <table><tbody id="rrows"></tbody></table><pre id="rdetail" data-agent-result="record"></pre>
+  </div>
+  <div id="tab-query" class="tab hide">
+    <div class="row"><select id="op" data-agent-field="op"></select><span id="opdesc" class="mut"></span></div>
+    <div id="form" class="human"></div>
+    <label>request JSON</label><textarea id="req" rows="6" data-agent-field="request"></textarea>
+    <div class="row"><button id="run" data-agent-op="run">Run</button></div>
+    <div id="qhuman" class="human"></div><pre id="resp" data-agent-result="response"></pre>
+  </div>
+  <div id="tab-graph" class="tab hide">
+    <div class="row"><input id="gstart" placeholder="entity (e.g. VOXPACK)" size="24"><label>hops <select id="ghops"><option>1</option><option selected>2</option><option>3</option></select></label>
+      <label>max edges <input id="gmax" type="number" value="60" style="width:60px"></label><label><input type="checkbox" id="gheur"> include heuristic</label><button id="grun" data-agent-op="graph_traverse">Walk</button></div>
+    <svg id="gsvg" width="100%" height="420" viewBox="-210 -210 420 420" class="human" style="border:1px solid var(--line)"></svg>
+    <pre id="glist" data-agent-result="graph"></pre>
+  </div>
+  <div id="tab-sources" class="tab hide"><table><thead><tr><th>source</th><th>chunks</th><th>edges</th><th>0-edge chunks</th><th>last ingest</th></tr></thead><tbody id="srows"></tbody></table></div>
+  <div id="tab-stats" class="tab hide"><pre id="stats" data-agent-result="stats"></pre></div>
+</section></main>
+<script>/*@READER@*/</script>
+<script>
+'use strict';
+var LP = window.LorepackPlayer, $ = function (id) { return document.getElementById(id); };
+var session = LP.createSession(), current = null, log = [], lastChecks = [], rpage = 0;
+function esc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
+function status(t) { $('status').textContent = t; }
+function download(name, text) { var a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([text], { type: 'application/x-ndjson' })); a.download = name; a.click(); setTimeout(function () { URL.revokeObjectURL(a.href); }, 1000); }
+async function run(req) {
+  if (current && !req.pack && LP.OPS.filter(function (o) { return o.name === req.op && o.packArg !== false; }).length) req.pack = current.tag;
+  var r = await session.run(req); log.push({ request: req, response: r }); $('logN').textContent = log.length; return r;
+}
+function setEmbed() {
+  var k = $('key').value.trim();
+  session.embed = k ? (function () {
+    var f = async function (text, want) {
+      var url = 'https://generativelanguage.googleapis.com/v1beta/models/' + want.model + ':batchEmbedContents?key=' + encodeURIComponent(k);
+      var r = await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ requests: [{ model: 'models/' + want.model, content: { parts: [{ text: text }] }, outputDimensionality: want.dim }] }) });
+      if (!r.ok) { var e = new Error('embed HTTP ' + r.status); e.code = 'E_NO_EMBEDDER'; throw e; }
+      var j = await r.json(); return { model: want.model, dim: want.dim, vector: j.embeddings[0].values };
+    }; f.model = 'gemini-embedding-2'; f.dim = 768; return f;
+  })() : null;
+}
+async function addBytes(bytes, name) {
+  status('loading ' + name + '...');
+  try {
+    var guess = /SYS\.AI\.([A-Z0-9_]+)\.([A-Z0-9_.]+?)(?: |-|\.lorepack|$)/.exec(name);
+    var p = await LP.loadPack(bytes, { ref: name, tag: guess ? 'SYS.AI.' + guess[1] + '.' + guess[2] : undefined });
+    session.addPack(p); select(p.tag); status('loaded ' + p.tag + ' (' + p.vectors.length + ' vectors, ' + p.edges.length + ' edges)');
+  } catch (e) { status('load failed: ' + (e.code || '') + ' ' + e.message); }
+}
+function renderPacks() {
+  $('packs').innerHTML = Array.from(session.packs.values()).map(function (p) {
+    return '<div class="pack' + (current === p ? ' on' : '') + '" data-tag="' + esc(p.tag) + '" data-agent-pack="' + esc(p.tag) + '"><b>' + esc(p.tag) + '</b><br><span class="mut">v ' + p.version.slice(0, 12) + ' · ' + p.vectors.length + ' vec · ' + p.edges.length + ' edges<br>' + esc(p.model) + ' / ' + p.dim + '</span></div>';
+  }).join('');
+  Array.from(document.querySelectorAll('.pack')).forEach(function (el) { el.onclick = function () { select(el.dataset.tag); }; });
+}
+function select(tag) { current = session.packs.get(tag); rpage = 0; renderPacks(); renderRecords(); renderSources(); renderStats(); }
+function tab(name) { Array.from(document.querySelectorAll('.tab')).forEach(function (t) { t.classList.toggle('hide', t.id !== 'tab-' + name); }); }
+Array.from(document.querySelectorAll('nav button')).forEach(function (b) { b.onclick = function () { tab(b.dataset.tab); }; });
+// verify
+$('runVerify').onclick = async function () {
+  if (!current) return status('load a pack first');
+  var r = await run({ op: 'pack_verify', args: { strict: $('strict').checked } }); lastChecks = r.ok ? r.result.checks : [];
+  $('vsum').innerHTML = r.ok ? '<span class="' + (r.result.summary.ok ? 'pass' : 'fail') + '">' + JSON.stringify(r.result.summary) + '</span>' : esc(r.error.message);
+  $('vrows').innerHTML = lastChecks.map(function (c) { return '<tr><td class="' + c.status + '">' + c.status + '</td><td>' + c.check + '</td><td>' + esc(c.name) + '</td><td>' + esc(c.detail) + (c.status !== 'pass' && c.actual != null ? '<br><span class="mut">' + esc(JSON.stringify(c.actual)).slice(0, 300) + '</span>' : '') + '</td></tr>'; }).join('');
+  $('vraw').textContent = lastChecks.map(function (c) { return JSON.stringify(c); }).join('\n');
+};
+$('dlVerify').onclick = function () { if (lastChecks.length) download((current ? current.tag : 'pack') + '.checks.jsonl', lastChecks.map(function (c) { return JSON.stringify(c); }).join('\n') + '\n'); };
+// records
+function renderRecords() {
+  if (!current) return; var type = $('rtype').value, f = $('rfilter').value.toLowerCase();
+  var list = type === 'vector' ? current.vectors : current.edges;
+  if (f) list = list.filter(function (r) { return (type === 'vector' ? r.t + ' ' + r.src + ' ' + r.id : r.s + ' ' + r.r + ' ' + r.o + ' ' + r.id).toLowerCase().indexOf(f) >= 0; });
+  var pages = Math.max(1, Math.ceil(list.length / 50)); rpage = Math.min(rpage, pages - 1);
+  $('rpage').textContent = (rpage + 1) + '/' + pages + ' (' + list.length + ')';
+  $('rrows').innerHTML = list.slice(rpage * 50, rpage * 50 + 50).map(function (r) {
+    return '<tr class="click" data-id="' + r.id + '"><td class="mut">' + r.id.slice(0, 16) + '</td><td>' + (type === 'vector' ? esc(r.src) + '</td><td>' + esc(String(r.t).slice(0, 140)) : esc(r.s) + '</td><td>' + esc(r.r) + ' → ' + esc(r.o) + ' <span class="mut">' + esc(r.og || 'no og') + '</span>') + '</td></tr>';
+  }).join('');
+  Array.from(document.querySelectorAll('#rrows tr')).forEach(function (tr) { tr.onclick = async function () { var r = await run({ op: 'record_get', args: { id: tr.dataset.id } }); $('rdetail').textContent = JSON.stringify(r.ok ? r.result : r.error, null, 1); }; });
+}
+$('rtype').onchange = $('rfilter').oninput = function () { rpage = 0; renderRecords(); };
+$('rprev').onclick = function () { rpage = Math.max(0, rpage - 1); renderRecords(); };
+$('rnext').onclick = function () { rpage++; renderRecords(); };
+// query: form generated from the op registry (same schemas agents see)
+$('op').innerHTML = LP.OPS.map(function (o) { return '<option value="' + o.name + '">' + o.name + '</option>'; }).join('');
+function buildForm() {
+  var def = LP.OPS.filter(function (o) { return o.name === $('op').value; })[0]; $('opdesc').textContent = def.description;
+  var props = def.input.properties || {}, html = '';
+  Object.keys(props).forEach(function (k) {
+    var p = props[k]; if (k === 'pack' || k === 'vector' || p.type === 'object') return;
+    var input = p.enum ? '<select data-k="' + k + '"><option value=""></option>' + p.enum.map(function (e) { return '<option>' + e + '</option>'; }).join('') + '</select>'
+      : p.type === 'boolean' ? '<input type="checkbox" data-k="' + k + '">'
+      : '<input data-k="' + k + '" size="' + (p.type === 'array' ? 30 : (p.type === 'integer' || p.type === 'number' ? 6 : 30)) + '" placeholder="' + (p.type === 'array' ? 'comma separated' : p.type) + '">';
+    html += '<div class="row"><label style="width:120px">' + k + '</label>' + input + '</div>';
+  });
+  $('form').innerHTML = html; Array.from($('form').querySelectorAll('[data-k]')).forEach(function (el) { el.oninput = el.onchange = syncReq; }); syncReq();
+}
+function syncReq() {
+  var def = LP.OPS.filter(function (o) { return o.name === $('op').value; })[0], args = {};
+  Array.from($('form').querySelectorAll('[data-k]')).forEach(function (el) {
+    var p = def.input.properties[el.dataset.k], v;
+    if (p.type === 'boolean') { if (el.checked) args[el.dataset.k] = true; return; }
+    v = el.value.trim(); if (!v) return;
+    if (p.type === 'integer') v = parseInt(v, 10); else if (p.type === 'number') v = Number(v); else if (p.type === 'array') v = v.split(',').map(function (s) { return s.trim(); }).filter(Boolean);
+    args[el.dataset.k] = v;
+  });
+  $('req').value = JSON.stringify({ op: def.name, args: args }, null, 1);
+}
+$('op').onchange = buildForm; buildForm();
+$('run').onclick = async function () {
+  var req; try { req = JSON.parse($('req').value); } catch (e) { $('resp').textContent = 'request is not JSON: ' + e.message; return; }
+  setEmbed(); var r = await run(req); $('resp').textContent = JSON.stringify(r, null, 1);
+  var hits = r.ok && r.result && (r.result.hits || r.result.edges);
+  $('qhuman').innerHTML = hits ? '<table>' + hits.map(function (h) { return '<tr><td>' + (h.score != null ? h.score.toFixed(3) : (h.matches || h.hop || '')) + '</td><td>' + esc(h.src || '') + '</td><td>' + esc(h.text || h.snippet || (h.s + ' — ' + h.r + ' → ' + h.o)) + '</td></tr>'; }).join('') + '</table>' : (r.ok ? '' : '<span class="fail">' + esc(r.error.code + ': ' + r.error.message) + '</span>');
+};
+// graph
+$('grun').onclick = async function () {
+  var r = await run({ op: 'graph_traverse', args: { start: [$('gstart').value], hops: +$('ghops').value, max_edges: +$('gmax').value, include_heuristic: $('gheur').checked } });
+  var svg = $('gsvg'); svg.innerHTML = '';
+  if (!r.ok) { $('glist').textContent = JSON.stringify(r.error, null, 1); return; }
+  var res = r.result, byHop = {}; res.nodes.forEach(function (n) { (byHop[n.hop] = byHop[n.hop] || []).push(n); });
+  $('glist').textContent = res.edges.map(function (e) { return 'hop ' + e.hop + '  ' + e.s + '  --' + e.r + '-->  ' + e.o + '   [' + e.origin + ', chunk ' + e.src.slice(8, 20) + ']'; }).join('\n') + (res.truncated ? '\n(truncated at max_edges)' : '');
+  var pos = {}, shown = res.nodes.slice(0, 80);
+  shown.forEach(function (n) { var ring = byHop[n.hop].filter(function (x) { return shown.indexOf(x) >= 0; }), i = ring.indexOf(n), a = 2 * Math.PI * i / Math.max(1, ring.length); var rad = n.hop * 65; pos[n.key] = [rad * Math.cos(a), rad * Math.sin(a)]; });
+  var ns = 'http://www.w3.org/2000/svg', g = '';
+  res.edges.forEach(function (e) { var a = pos[LP.normText(e.s)], b = pos[LP.normText(e.o)]; if (a && b) g += '<line x1="' + a[0] + '" y1="' + a[1] + '" x2="' + b[0] + '" y2="' + b[1] + '" stroke="#bbb"><title>' + esc(e.r) + '</title></line>'; });
+  shown.forEach(function (n) { var p = pos[n.key]; g += '<circle cx="' + p[0] + '" cy="' + p[1] + '" r="' + (n.hop ? 3 : 5) + '" fill="' + (n.hop ? '#555' : '#000') + '"></circle><text x="' + (p[0] + 5) + '" y="' + (p[1] + 3) + '" font-size="' + (n.hop ? 7 : 10) + '">' + esc(String(n.entity).slice(0, 24)) + '</text>'; });
+  svg.innerHTML = g; void ns;
+};
+async function renderSources() { if (!current) return; var r = await run({ op: 'sources_list' }); $('srows').innerHTML = r.ok ? r.result.sources.map(function (s) { return '<tr><td>' + esc(s.source) + '</td><td>' + s.chunks + '</td><td>' + s.edges + '</td><td>' + s.chunks_without_edges + '</td><td class="mut">' + esc(s.last_ts || '') + '</td></tr>'; }).join('') : ''; }
+async function renderStats() { if (!current) return; var r = await run({ op: 'pack_stats', args: { top: 20 } }); $('stats').textContent = JSON.stringify(r.ok ? r.result : r.error, null, 1); }
+// loading
+$('file').onchange = async function () { for (var i = 0; i < this.files.length; i++) { var f = this.files[i]; await addBytes(new Uint8Array(await f.arrayBuffer()), f.name); } };
+$('loadUrl').onclick = async function () { var u = $('url').value.trim(); if (!u) return; try { var r = await fetch(u); if (!r.ok) throw new Error('HTTP ' + r.status); await addBytes(new Uint8Array(await r.arrayBuffer()), u.split('/').pop()); } catch (e) { status('load failed: ' + e.message); } };
+document.addEventListener('dragover', function (e) { e.preventDefault(); });
+document.addEventListener('drop', async function (e) { e.preventDefault(); for (var i = 0; i < e.dataTransfer.files.length; i++) { var f = e.dataTransfer.files[i]; await addBytes(new Uint8Array(await f.arrayBuffer()), f.name); } });
+$('machine').onchange = function () { document.body.classList.toggle('machine', this.checked); };
+$('dlLog').onclick = function () { download('inspector-session.jsonl', log.map(function (x) { return JSON.stringify(x); }).join('\n') + '\n'); };
+// agent hook: the same op registry, callable from the console or by a browser agent
+window.inspector = { run: run, ops: LP.OPS.map(function (o) { return o.name; }), packs: function () { return Array.from(session.packs.keys()); }, log: function () { return log.slice(); } };
+var q = new URLSearchParams(location.search).get('pack'); if (q) { $('url').value = q; $('loadUrl').click(); }
+</script>
+</body></html>

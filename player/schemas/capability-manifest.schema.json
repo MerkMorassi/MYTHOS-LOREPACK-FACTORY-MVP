@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mythos.local/schemas/SYS.AI.MAYA.SESAME/capability-manifest.schema.json",
+  "title": "Lorepack player capability manifest",
+  "description": "What a player exposes. Returned by capabilities_get, served at GET /.well-known/lorepack-player.json on an HTTP player, and written as capabilities.json next to a pack in the store. Generated from the op registry, never hand-written.",
+  "type": "object",
+  "required": ["schema", "afc", "player", "pack_format", "packs", "ops", "limits", "embedder", "a2a", "errors"],
+  "properties": {
+    "schema": { "const": "lorepack-player/capabilities@0.1" },
+    "afc": { "type": "string", "description": "AFC profile the player claims, e.g. AFC-0.1." },
+    "player": { "type": "object", "required": ["name", "version"], "properties": { "name": { "type": "string" }, "version": { "type": "string" }, "author": { "type": "string" }, "runtime": { "type": "string" } } },
+    "pack_format": { "type": "object", "properties": { "v": { "type": "array", "items": { "type": "integer" } }, "encodings": { "type": "array", "items": { "type": "string" } }, "id_schemes": { "type": "array", "items": { "type": "string" } } } },
+    "packs": { "type": "array", "items": { "type": "object", "required": ["tag", "version", "agent", "model", "dim"], "properties": { "tag": { "type": "string" }, "version": { "type": "string" }, "agent": { "type": "string" }, "model": { "type": ["string", "null"] }, "dim": { "type": ["integer", "null"] }, "counts": { "type": "object" }, "body_sha256": { "type": "string" } } } },
+    "ops": { "type": "array", "minItems": 1, "items": { "type": "object", "required": ["name", "title", "description", "readOnly", "destructive", "input"], "properties": { "name": { "type": "string", "pattern": "^[a-z]+(_[a-z]+)+$", "description": "snake_case noun_verb" }, "title": { "type": "string" }, "description": { "type": "string" }, "readOnly": { "type": "boolean" }, "destructive": { "type": "boolean" }, "input": { "type": "object", "description": "JSON Schema for args." } } } },
+    "limits": { "type": "object", "required": ["max_k", "max_hops", "max_edges"], "properties": { "max_k": { "type": "integer" }, "max_hops": { "type": "integer" }, "max_edges": { "type": "integer" }, "max_chars": { "type": "integer" }, "a2a_max_hops": { "type": "integer" }, "a2a_hard_ceiling": { "type": "integer" }, "a2a_max_fanout": { "type": "integer" } } },
+    "embedder": { "type": "object", "required": ["available"], "properties": { "available": { "type": "boolean" }, "model": { "type": ["string", "null"] }, "dim": { "type": ["integer", "null"] } } },
+    "a2a": { "type": "object", "properties": { "envelope": { "type": "string" }, "agent": { "type": ["string", "null"] }, "max_hops": { "type": "integer" }, "hard_ceiling": { "type": "integer" }, "max_fanout": { "type": "integer" } } },
+    "errors": { "type": "array", "items": { "type": "string" } },
+    "endpoints": { "type": "object", "description": "Optional, for networked players: {jsonl_stdio, http, mcp, ws}." }
+  }
+}

@@ -1,0 +1,98 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mythos.local/schemas/SYS.AI.MAYA.SESAME/lorepack-record.schema.json",
+  "title": "Lorepack v2 record (one JSONL line)",
+  "description": "One line of a .lorepack(.gz) file. v2 as exported by MYTHOS-LOREPACK-FACTORY-MVP src/packer.ts, plus the additive v2.1 fields marked [v2.1]. Additive fields are safe: the factory reader ignores unknown keys on header, vector and edge records. A NEW record type is not safe: the factory reader treats any type other than header/manifest/edge as a vector and throws. Author: SYS.AI.MAYA.SESAME.",
+  "oneOf": [
+    { "$ref": "#/$defs/header" },
+    { "$ref": "#/$defs/vector" },
+    { "$ref": "#/$defs/edge" }
+  ],
+  "$defs": {
+    "sha256hex": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "visibility": { "type": "string", "enum": ["self", "global", "public"], "description": "[v2.1] Who may read this record through another agent's query. Absent: the owner's exposure.default_visibility (default self)." },
+    "header": {
+      "type": "object",
+      "description": "First line. The factory reader skips it; the player requires it.",
+      "required": ["type", "v", "agentId", "embeddingModel", "embeddingDimension", "totalVectors", "totalEdges"],
+      "properties": {
+        "type": { "const": "header" },
+        "v": { "const": 2 },
+        "agentId": { "type": "string", "minLength": 1, "description": "Roster id, upper case (MAYA, BARBELO...)." },
+        "embeddingModel": { "type": "string", "minLength": 1, "description": "Pinned model id, e.g. gemini-embedding-2." },
+        "embeddingDimension": { "type": "integer", "minimum": 1 },
+        "totalVectors": { "type": "integer", "minimum": 0 },
+        "totalEdges": { "type": "integer", "minimum": 0 },
+        "exportedAt": { "type": "string" },
+        "agent": { "type": "string", "pattern": "^SYS\\.AI\\.[A-Z0-9_]+$", "description": "[v2.1] The agent's system name, e.g. SYS.AI.MAYA. agentId stays the roster id." },
+        "agentNumber": { "type": "string", "pattern": "^[0-9]{3}$", "description": "[v2.1] Merk's agent number, zero-padded roster order, e.g. 015 for Maya." },
+        "agentOrder": { "type": "integer", "minimum": 0, "description": "[v2.1] Roster order (src/agents.ts)." },
+        "agentPort": { "type": "integer", "minimum": 1, "description": "[v2.1] Roster port (4000 + order)." },
+        "packTag": { "type": "string", "pattern": "^SYS\\.AI\\.[A-Z0-9_]+\\.[A-Z0-9_.]+$", "description": "[v2.1] SYS.AI.<AGENT>.<LOCUS>." },
+        "bodySha256": { "$ref": "#/$defs/sha256hex", "description": "[v2.1] sha256 of the UTF-8 bytes of every line after the header, each ending in \\n, as stored (uncompressed)." },
+        "recordSetSha256": { "$ref": "#/$defs/sha256hex", "description": "[v2.1] The pack version: sha256 of the sorted record ids joined by \\n. Independent of order, compression and whitespace." },
+        "idScheme": { "type": "string", "enum": ["node-v1", "node-v2"], "description": "[v2.1] How vector ids were made. node-v1: sha256(AGENT:trim(lower(text))). node-v2: sha256(AGENT:source:NFC-collapsed-lower(text))." },
+        "seq": { "type": "integer", "minimum": 1, "description": "[v2.1] Version sequence in the store for this pack tag." },
+        "parents": { "type": "array", "items": { "$ref": "#/$defs/sha256hex" }, "description": "[v2.1] recordSetSha256 of the version(s) this one was made from. Two parents = a sync merge." },
+        "segment": { "type": "string", "enum": ["full", "append"], "description": "[v2.1] append: holds only new chunks and their edges on top of parents[0]." },
+        "producer": { "type": "object", "description": "[v2.1] Who wrote it: {tool, version, locus}.", "properties": { "tool": { "type": "string" }, "version": { "type": "string" }, "locus": { "type": "string" } } },
+        "extractionModel": { "type": "string", "description": "[v2.1] Model used for triplets in this version (edges still carry og each)." }
+      },
+      "additionalProperties": true
+    },
+    "vector": {
+      "type": "object",
+      "description": "One chunk with its embedding. Its id is the chunk id that edges point at with src.",
+      "required": ["type", "id", "a", "t", "vec", "src", "d"],
+      "properties": {
+        "v": { "const": 2 },
+        "type": { "const": "vector" },
+        "id": { "type": "string", "pattern": "^lp_(node|chat)_[0-9a-f]{64}$" },
+        "a": { "type": "string", "description": "Owner agent id." },
+        "h": { "type": "string", "description": "Handle; empty in current exports." },
+        "m": { "type": "string", "description": "Sigil (numMarkId) from packer.stageText." },
+        "t": { "type": "string", "minLength": 1, "description": "Chunk text." },
+        "vec": { "type": "array", "items": { "type": "number" }, "minItems": 1 },
+        "src": { "type": "string", "minLength": 1, "description": "Source name. Must be stable for the same input (file name or content hash), never wall-clock time." },
+        "ps": { "type": "string", "enum": ["pending", "completed", "failed"], "description": "[v2.1, in Maya's local patch] Triplet extraction status. completed with zero edges is a valid answer." },
+        "p": { "$ref": "#/$defs/visibility" },
+        "d": {
+          "type": "object",
+          "required": ["embeddingModel", "embeddingDimension"],
+          "properties": {
+            "source": { "type": "string" },
+            "timestamp": { "type": "string" },
+            "locus": { "type": "string", "description": "Lore locus, e.g. MYTHOS.LORE.MAYA (not the SYS.AI locus)." },
+            "embeddingModel": { "type": "string" },
+            "embeddingDimension": { "type": "integer" },
+            "embeddingEpoch": { "type": "string" },
+            "fingerprint": { "$ref": "#/$defs/sha256hex" },
+            "chunk_index": { "type": "integer" }
+          },
+          "additionalProperties": true
+        }
+      },
+      "additionalProperties": true
+    },
+    "edge": {
+      "type": "object",
+      "description": "One triplet extracted from the chunk named by src.",
+      "required": ["type", "id", "aid", "src", "s", "r", "o"],
+      "properties": {
+        "v": { "const": 2 },
+        "type": { "const": "edge" },
+        "id": { "type": "string", "pattern": "^lp_edge_[0-9a-f]{64}$", "description": "sha256(lower(aid:src:s:r:o))." },
+        "aid": { "type": "string" },
+        "src": { "type": "string", "description": "Id of the vector (chunk) this triplet came from." },
+        "s": { "type": "string", "minLength": 1 },
+        "r": { "type": "string", "minLength": 1 },
+        "o": { "type": "string", "minLength": 1 },
+        "timestamp": { "type": "string" },
+        "og": { "type": "string", "minLength": 1, "description": "[v2.1, in Maya's local patch] Origin: the extraction model id, or the literal 'heuristic'. Required under the strict profile." },
+        "run": { "type": "string", "description": "[v2.1] Extraction run id (ISO time or ulid). Per chunk, the newest run's edge set wins on rebuild and on sync." },
+        "p": { "$ref": "#/$defs/visibility" }
+      },
+      "additionalProperties": true
+    }
+  }
+}

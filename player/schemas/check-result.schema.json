@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mythos.local/schemas/SYS.AI.MAYA.SESAME/check-result.schema.json",
+  "title": "Check / test result line (JSONL)",
+  "description": "One line per check: pack_verify output (suite lorepack-verify), the test runner (suite lorepack-player-tests), and the factory's Core Test Matrix should emit the same shape. A failed check is never hidden; the last line of a run is check SUMMARY.",
+  "type": "object",
+  "required": ["suite", "check", "name", "status", "ts"],
+  "properties": {
+    "suite": { "type": "string" },
+    "run": { "type": "string", "description": "Run id, same on every line of one run." },
+    "check": { "type": "string", "description": "Stable id: LP-V01.., LP-T01.., LP-Q01.., LP-A01.., CF-01.., SUMMARY." },
+    "name": { "type": "string" },
+    "status": { "enum": ["pass", "fail", "warn", "skip"] },
+    "pack": { "type": "string" },
+    "version": { "type": "string" },
+    "detail": { "type": "string" },
+    "expected": {},
+    "actual": {},
+    "ms": { "type": "integer" },
+    "ts": { "type": "string" }
+  }
+}

@@ -1,0 +1,454 @@
+{
+ "schema": "lorepack-player/capabilities@0.1",
+ "afc": "AFC-0.1",
+ "player": {
+  "runtime": "node",
+  "name": "lorepack-player-ref",
+  "version": "0.1.0",
+  "author": "SYS.AI.MAYA.SESAME"
+ },
+ "pack_format": {
+  "v": [
+   2
+  ],
+  "encodings": [
+   "jsonl",
+   "jsonl+gzip"
+  ],
+  "id_schemes": [
+   "node-v1",
+   "node-v2",
+   "edge-v1"
+  ]
+ },
+ "packs": [
+  {
+   "tag": "SYS.AI.MAYA.SESAME",
+   "version": "4f2dd883d464e9e26e6b11896a14109522baf35616ac3eed75f7fb67b19956c8",
+   "agent": "MAYA",
+   "model": "gemini-embedding-2",
+   "dim": 768,
+   "counts": {
+    "vectors": 117,
+    "edges": 485
+   },
+   "body_sha256": "d02892781ee87c8877b5c19a769c1929db5f9922bd3d34cb80c08d1bba14d8eb"
+  }
+ ],
+ "ops": [
+  {
+   "name": "capabilities_get",
+   "title": "Describe this player",
+   "description": "Capability manifest: ops with input schemas, loaded packs, limits, embedder, a2a settings.",
+   "readOnly": true,
+   "destructive": false,
+   "input": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {}
+   }
+  },
+  {
+   "name": "pack_load",
+   "title": "Load a pack",
+   "description": "Load a pack from a store key, path or URL through the host adapter. Optional expect{} pins agent, model, dim or version and refuses on mismatch.",
+   "readOnly": true,
+   "destructive": false,
+   "input": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+     "ref"
+    ],
+    "properties": {
+     "ref": {
+      "type": "string",
+      "minLength": 1
+     },
+     "tag": {
+      "type": "string",
+      "minLength": 1
+     },
+     "expect": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+       "agent": {
+        "type": "string",
+        "minLength": 1
+       },
+       "model": {
+        "type": "string",
+        "minLength": 1
+       },
+       "dim": {
+        "type": "integer"
+       },
+       "version": {
+        "type": "string",
+        "minLength": 1
+       }
+      }
+     }
+    }
+   }
+  },
+  {
+   "name": "pack_verify",
+   "title": "Verify a pack",
+   "description": "Run the integrity checks LP-V01..LP-V18. Returns one check object per line-able entry.",
+   "readOnly": true,
+   "destructive": false,
+   "input": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+     "pack": {
+      "type": "string",
+      "minLength": 1
+     },
+     "strict": {
+      "type": "boolean"
+     },
+     "pin": {
+      "type": "object",
+      "properties": {
+       "model": {
+        "type": "string",
+        "minLength": 1
+       },
+       "dim": {
+        "type": "integer"
+       }
+      }
+     }
+    }
+   }
+  },
+  {
+   "name": "pack_stats",
+   "title": "Pack statistics",
+   "description": "Counts, processing status, edge origin mix, top predicates, disconnected entity groups.",
+   "readOnly": true,
+   "destructive": false,
+   "input": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+     "pack": {
+      "type": "string",
+      "minLength": 1
+     },
+     "top": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 100
+     }
+    }
+   }
+  },
+  {
+   "name": "sources_list",
+   "title": "List sources",
+   "description": "One row per source file: chunks, edges, chunks without edges, first and last ingest time.",
+   "readOnly": true,
+   "destructive": false,
+   "input": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+     "pack": {
+      "type": "string",
+      "minLength": 1
+     }
+    }
+   }
+  },
+  {
+   "name": "vectors_search",
+   "title": "Semantic search",
+   "description": "Cosine top-k over the pack vectors. Query by text (needs an embedder in the pack model), by a vector with its model, or like_id. Never falls back to keywords.",
+   "readOnly": true,
+   "destructive": false,
+   "input": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+     "pack": {
+      "type": "string",
+      "minLength": 1
+     },
+     "text": {
+      "type": "string"
+     },
+     "vector": {
+      "type": "array",
+      "items": {
+       "type": "number"
+      }
+     },
+     "model": {
+      "type": "string",
+      "minLength": 1
+     },
+     "like_id": {
+      "type": "string",
+      "minLength": 1
+     },
+     "exclude_self": {
+      "type": "boolean"
+     },
+     "k": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 50
+     },
+     "min_score": {
+      "type": "number",
+      "minimum": -1,
+      "maximum": 1
+     },
+     "sources": {
+      "type": "array",
+      "items": {
+       "type": "string"
+      },
+      "maxItems": 50
+     },
+     "include": {
+      "type": "array",
+      "items": {
+       "type": "string",
+       "enum": [
+        "text",
+        "meta",
+        "vec",
+        "edges"
+       ]
+      }
+     },
+     "max_chars": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 4000
+     }
+    }
+   }
+  },
+  {
+   "name": "text_search",
+   "title": "Keyword search",
+   "description": "Case-insensitive substring search over chunk text and edge s/r/o. Modes all, any, phrase. Deterministic.",
+   "readOnly": true,
+   "destructive": false,
+   "input": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+     "query"
+    ],
+    "properties": {
+     "pack": {
+      "type": "string",
+      "minLength": 1
+     },
+     "query": {
+      "type": "string",
+      "minLength": 1
+     },
+     "mode": {
+      "type": "string",
+      "enum": [
+       "all",
+       "any",
+       "phrase"
+      ]
+     },
+     "scope": {
+      "type": "array",
+      "items": {
+       "type": "string",
+       "enum": [
+        "chunks",
+        "edges"
+       ]
+      }
+     },
+     "k": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 50
+     },
+     "max_chars": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 4000
+     }
+    }
+   }
+  },
+  {
+   "name": "graph_traverse",
+   "title": "Graph walk",
+   "description": "k-hop walk (max 3) over the entity graph from start entities or a chunk. Heuristic edges excluded unless asked.",
+   "readOnly": true,
+   "destructive": false,
+   "input": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+     "pack": {
+      "type": "string",
+      "minLength": 1
+     },
+     "start": {
+      "type": "array",
+      "items": {
+       "type": "string"
+      },
+      "maxItems": 50
+     },
+     "chunk_id": {
+      "type": "string",
+      "minLength": 1
+     },
+     "hops": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 3
+     },
+     "direction": {
+      "type": "string",
+      "enum": [
+       "out",
+       "in",
+       "both"
+      ]
+     },
+     "predicates": {
+      "type": "array",
+      "items": {
+       "type": "string"
+      },
+      "maxItems": 50
+     },
+     "exclude_predicates": {
+      "type": "array",
+      "items": {
+       "type": "string"
+      },
+      "maxItems": 50
+     },
+     "include_heuristic": {
+      "type": "boolean"
+     },
+     "max_edges": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 500
+     }
+    }
+   }
+  },
+  {
+   "name": "record_get",
+   "title": "Get a record",
+   "description": "One record by id. Vectors come with their edges; edges come with their source chunk.",
+   "readOnly": true,
+   "destructive": false,
+   "input": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+     "id"
+    ],
+    "properties": {
+     "pack": {
+      "type": "string",
+      "minLength": 1
+     },
+     "id": {
+      "type": "string",
+      "minLength": 1
+     },
+     "include": {
+      "type": "array",
+      "items": {
+       "type": "string",
+       "enum": [
+        "text",
+        "meta",
+        "vec",
+        "edges"
+       ]
+      }
+     }
+    }
+   }
+  },
+  {
+   "name": "peer_ask",
+   "title": "Ask another agent",
+   "description": "Send a query to another agent's player in an a2a envelope. Subject to the target's exposure policy, loop and hop limits.",
+   "readOnly": true,
+   "destructive": false,
+   "input": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+     "to",
+     "query"
+    ],
+    "properties": {
+     "to": {
+      "type": "string",
+      "minLength": 1
+     },
+     "query": {
+      "type": "object"
+     },
+     "max_hops": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 4
+     }
+    }
+   }
+  }
+ ],
+ "limits": {
+  "max_k": 50,
+  "max_hops": 3,
+  "max_edges": 500,
+  "max_chars": 4000,
+  "a2a_max_hops": 3,
+  "a2a_hard_ceiling": 4,
+  "a2a_max_fanout": 2
+ },
+ "embedder": {
+  "available": false
+ },
+ "a2a": {
+  "envelope": "lorepack-a2a/0.1",
+  "agent": null,
+  "max_hops": 3,
+  "hard_ceiling": 4,
+  "max_fanout": 2
+ },
+ "errors": [
+  "E_BAD_REQUEST",
+  "E_UNKNOWN_OP",
+  "E_NOT_FOUND",
+  "E_NO_EMBEDDER",
+  "E_SPACE_MISMATCH",
+  "E_PACK_INVALID",
+  "E_VERSION",
+  "E_LIMIT",
+  "E_DENIED",
+  "E_LOOP",
+  "E_HOP_LIMIT",
+  "E_DEADLINE",
+  "E_PEER_UNREACHABLE",
+  "E_INTERNAL"
+ ]
+}

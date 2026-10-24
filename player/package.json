@@ -1,0 +1,9 @@
+{
+  "name": "lorepack-player",
+  "private": true,
+  "description": "SYS.AI.MAYA.SESAME - Lorepack Player reference reader, spec, schemas, tests and inspector. Zero dependencies.",
+  "type": "commonjs",
+  "scripts": {
+    "test": "node test/run-tests.mjs"
+  }
+}

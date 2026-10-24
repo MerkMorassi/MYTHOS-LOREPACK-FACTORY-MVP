@@ -1,0 +1,74 @@
+{
+ "schema": "lorepack-store/pack@0.1",
+ "tag": "SYS.AI.MAYA.SESAME",
+ "agent": {
+  "id": "MAYA",
+  "order": 15,
+  "port": 4015,
+  "agent_number": "015"
+ },
+ "space": {
+  "model": "gemini-embedding-2",
+  "dim": 768,
+  "epoch": "gemini-embedding-2"
+ },
+ "writers": [
+  "MAYA",
+  "MERKOS"
+ ],
+ "head": "4f2dd883d464e9e26e6b11896a14109522baf35616ac3eed75f7fb67b19956c8",
+ "versions": [
+  {
+   "seq": 1,
+   "version": "4f2dd883d464e9e26e6b11896a14109522baf35616ac3eed75f7fb67b19956c8",
+   "file": "v/000001.4f2dd883d464e9e2.lorepack.gz",
+   "body_sha256": "d02892781ee87c8877b5c19a769c1929db5f9922bd3d34cb80c08d1bba14d8eb",
+   "segment": "full",
+   "parents": [],
+   "counts": {
+    "vectors": 117,
+    "edges": 485
+   },
+   "verified": "checks/000001.checks.jsonl",
+   "minted_at": "2026-10-24T02:53:57.060Z",
+   "minted_by": "MAYA",
+   "imported_from": "SYS.AI.MAYA.SESAME - LOREPACK SYS.AI.MAYA 015 2026-10-23.lorepack.gz"
+  }
+ ],
+ "exposure": {
+  "default": "deny",
+  "default_visibility": "global",
+  "rules": [
+   {
+    "callers": [
+     "MERKOS"
+    ],
+    "ops": "*",
+    "visibility": [
+     "self",
+     "global",
+     "public"
+    ]
+   },
+   {
+    "callers": [
+     "roster"
+    ],
+    "ops": [
+     "capabilities_get",
+     "pack_stats",
+     "sources_list",
+     "vectors_search",
+     "text_search",
+     "graph_traverse",
+     "record_get",
+     "peer_ask"
+    ],
+    "visibility": [
+     "global",
+     "public"
+    ]
+   }
+  ]
+ }
+}

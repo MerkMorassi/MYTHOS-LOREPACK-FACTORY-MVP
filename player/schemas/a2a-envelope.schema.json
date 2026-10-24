@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mythos.local/schemas/SYS.AI.MAYA.SESAME/a2a-envelope.schema.json",
+  "title": "Lorepack agent-to-agent envelope (lorepack-a2a/0.1)",
+  "description": "One agent asks another agent's player. The same envelope goes in-process, over HTTP POST /a2a, over WebSocket, or through the intercom. from is stamped by the transport from the authenticated connection; a from in the body is overwritten.",
+  "oneOf": [ { "$ref": "#/$defs/request" }, { "$ref": "#/$defs/reply" } ],
+  "$defs": {
+    "agent_ref": { "type": "object", "required": ["agent"], "properties": { "agent": { "type": "string", "description": "Roster id (MAYA)." }, "order": { "type": ["integer", "null"], "description": "Roster order 0..15." }, "locus": { "type": "string", "description": "SYS.AI.<AGENT>.<LOCUS> of the calling player." } } },
+    "request": {
+      "type": "object",
+      "required": ["a2a", "id", "trace", "from", "to", "hop", "max_hops", "path", "deadline", "query"],
+      "properties": {
+        "a2a": { "const": "lorepack-a2a/0.1" },
+        "id": { "type": "string" },
+        "trace": { "type": "string", "description": "Id of the first envelope in the chain; constant along it." },
+        "from": { "$ref": "#/$defs/agent_ref" },
+        "to": { "$ref": "#/$defs/agent_ref" },
+        "on_behalf_of": { "type": "string", "description": "Optional: MERKOS when a human started the chain from the HITL player." },
+        "hop": { "type": "integer", "minimum": 1 },
+        "max_hops": { "type": "integer", "minimum": 1, "maximum": 4, "description": "Set by the first asker, never raised downstream. Hard ceiling 4." },
+        "path": { "type": "array", "items": { "type": "string" }, "minItems": 1, "description": "Every agent that has sent this chain so far, first asker first. Loop if to is in path. Exposure is checked against every agent in path." },
+        "deadline": { "type": "string", "description": "ISO time; inherited, never extended." },
+        "query": { "$ref": "query-request.schema.json" },
+        "ts": { "type": "string" },
+        "sig": { "type": "string", "description": "Reserved: signature by the sender's key once identities are keyed." }
+      }
+    },
+    "reply": {
+      "type": "object",
+      "required": ["a2a", "id", "in_reply_to", "trace", "from", "to", "hop", "ok", "provenance_chain"],
+      "properties": {
+        "a2a": { "const": "lorepack-a2a/0.1" },
+        "id": { "type": "string" },
+        "in_reply_to": { "type": "string" },
+        "trace": { "type": "string" },
+        "from": { "$ref": "#/$defs/agent_ref" },
+        "to": { "$ref": "#/$defs/agent_ref" },
+        "hop": { "type": "integer" },
+        "ok": { "type": "boolean" },
+        "response": { "$ref": "query-response.schema.json" },
+        "error": { "$ref": "query-response.schema.json#/$defs/error" },
+        "provenance_chain": { "type": "array", "items": { "$ref": "query-response.schema.json#/$defs/chain_link" } },
+        "ts": { "type": "string" }
+      }
+    }
+  }
+}

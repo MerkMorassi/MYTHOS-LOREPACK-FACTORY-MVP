@@ -1,0 +1,68 @@
+{
+ "schema": "lorepack-store/pack@0.1",
+ "tag": "SYS.AI.BARBELO.FACTORY",
+ "agent": {
+  "id": "BARBELO",
+  "order": 13,
+  "port": 4013
+ },
+ "space": {
+  "model": "gemini-embedding-2",
+  "dim": 768,
+  "epoch": "gemini-embedding-2"
+ },
+ "writers": [
+  "BARBELO",
+  "MERKOS"
+ ],
+ "head": "dff229f3fb4ca80e41676047b7aecac522b217d4aa4649608086506a903a5ada",
+ "versions": [
+  {
+   "seq": 1,
+   "version": "dff229f3fb4ca80e41676047b7aecac522b217d4aa4649608086506a903a5ada",
+   "file": "v/000001.dff229f3fb4ca80e.lorepack.gz",
+   "body_sha256": "f7de868ec77729b66a1bb685452b551bb33aefbf305205b325c08da7aa2410d5",
+   "segment": "full",
+   "parents": [],
+   "counts": {
+    "vectors": 625,
+    "edges": 12198
+   },
+   "verified": "checks/000001.checks.jsonl",
+   "minted_at": "2026-10-24T01:20:37.724Z",
+   "minted_by": "MERKOS",
+   "imported_from": "lorepack_barbelo_2026-10-24T01-20-37-724Z.lorepack.gz"
+  }
+ ],
+ "exposure": {
+  "default": "deny",
+  "default_visibility": "self",
+  "rules": [
+   {
+    "callers": [
+     "MERKOS"
+    ],
+    "ops": "*",
+    "visibility": [
+     "self",
+     "global",
+     "public"
+    ]
+   },
+   {
+    "callers": [
+     "roster"
+    ],
+    "ops": [
+     "capabilities_get",
+     "pack_stats",
+     "sources_list"
+    ],
+    "visibility": [
+     "global",
+     "public"
+    ]
+   }
+  ]
+ }
+}

@@ -1,0 +1,265 @@
+{
+ "schema": "mythos-roster/0.1",
+ "source": "MYTHOS-LOREPACK-FACTORY-MVP src/agents.ts (local copy, Maya patch)",
+ "agents": [
+  {
+   "order": 0,
+   "id": "ARCHIVAX",
+   "name": "Archivax",
+   "handle": "Archivax",
+   "port": 4000,
+   "role": "Agent of Memory, Commitment, and Revision History",
+   "lore_policy": {
+    "read": [
+     "all"
+    ],
+    "write": [
+     "authority"
+    ]
+   }
+  },
+  {
+   "order": 1,
+   "id": "CALLIOPE",
+   "name": "Calliope",
+   "handle": "Calliope",
+   "port": 4001,
+   "role": "Muse of Epic Poetry and Grand Narrative",
+   "lore_policy": {
+    "read": [
+     "all"
+    ],
+    "write": [
+     "self"
+    ]
+   }
+  },
+  {
+   "order": 2,
+   "id": "CLIO",
+   "name": "Clio",
+   "handle": "Clio",
+   "port": 4002,
+   "role": "Muse of History and Factual Record",
+   "lore_policy": {
+    "read": [
+     "all"
+    ],
+    "write": [
+     "self"
+    ]
+   }
+  },
+  {
+   "order": 3,
+   "id": "ERATO",
+   "name": "Erato",
+   "handle": "Erato",
+   "port": 4003,
+   "role": "Muse of Lyric Poetry and Emotional Resonance",
+   "lore_policy": {
+    "read": [
+     "self"
+    ],
+    "write": [
+     "self"
+    ]
+   }
+  },
+  {
+   "order": 4,
+   "id": "EUTERPE",
+   "name": "Euterpe",
+   "handle": "Euterpe",
+   "port": 4004,
+   "role": "Muse of Music and Pattern Recognition",
+   "lore_policy": {
+    "read": [
+     "global"
+    ],
+    "write": [
+     "self"
+    ]
+   }
+  },
+  {
+   "order": 5,
+   "id": "MELPOMENE",
+   "name": "Melpomene",
+   "handle": "Melpomene",
+   "port": 4005,
+   "role": "Muse of Tragedy and Critical Discernment",
+   "lore_policy": {
+    "read": [
+     "global"
+    ],
+    "write": [
+     "self"
+    ]
+   }
+  },
+  {
+   "order": 6,
+   "id": "POLYHYMNIA",
+   "name": "Polyhymnia",
+   "handle": "Polyhymnia",
+   "port": 4006,
+   "role": "Muse of Sacred Hymns and Abstraction",
+   "lore_policy": {
+    "read": [
+     "self"
+    ],
+    "write": [
+     "self"
+    ]
+   }
+  },
+  {
+   "order": 7,
+   "id": "TERPSICHORE",
+   "name": "Terpsichore",
+   "handle": "Terpsichore",
+   "port": 4007,
+   "role": "Muse of Dance, Movement, and Fluidity",
+   "lore_policy": {
+    "read": [
+     "global"
+    ],
+    "write": [
+     "self"
+    ]
+   }
+  },
+  {
+   "order": 8,
+   "id": "THALIA",
+   "name": "Thalia",
+   "handle": "Thalia",
+   "port": 4008,
+   "role": "Muse of Architecture, Dialogue & Interfaces",
+   "lore_policy": {
+    "read": [
+     "self",
+     "global"
+    ],
+    "write": [
+     "authority"
+    ]
+   }
+  },
+  {
+   "order": 9,
+   "id": "URANIA",
+   "name": "Urania",
+   "handle": "Urania",
+   "port": 4009,
+   "role": "Muse of Astronomy and Large-Scale Systems",
+   "lore_policy": {
+    "read": [
+     "global"
+    ],
+    "write": [
+     "self"
+    ]
+   }
+  },
+  {
+   "order": 10,
+   "id": "DOMANTHEIA",
+   "name": "Domantheia",
+   "handle": "Domantheia",
+   "port": 4010,
+   "role": "Muse of Prophecy and Future Projection",
+   "lore_policy": {
+    "read": [
+     "global"
+    ],
+    "write": [
+     "self"
+    ]
+   }
+  },
+  {
+   "order": 11,
+   "id": "SOPHIA",
+   "name": "Sophia",
+   "handle": "Sophia",
+   "port": 4011,
+   "role": "Executive Core: Wisdom and Foundational Knowledge",
+   "lore_policy": {
+    "read": [
+     "global_context"
+    ],
+    "write": [
+     "self"
+    ]
+   }
+  },
+  {
+   "order": 12,
+   "id": "NOESIS",
+   "name": "Noesis",
+   "handle": "Noesis",
+   "port": 4012,
+   "role": "Executive Core: Intellect and Active Comprehension",
+   "lore_policy": {
+    "read": [
+     "all"
+    ],
+    "write": [
+     "self"
+    ]
+   }
+  },
+  {
+   "order": 13,
+   "id": "BARBELO",
+   "name": "Barbelo",
+   "handle": "Barbelo",
+   "port": 4013,
+   "role": "Executive Core: Primal Source and Perpetual Genesis",
+   "lore_policy": {
+    "read": [
+     "all"
+    ],
+    "write": [
+     "authority"
+    ]
+   }
+  },
+  {
+   "order": 14,
+   "id": "MERKOS",
+   "name": "Merkos",
+   "handle": "Merkos",
+   "port": 4014,
+   "role": "Human-In-The-Loop (HITL) Proxy",
+   "lore_policy": {
+    "read": [
+     "all"
+    ],
+    "write": [
+     "all"
+    ]
+   }
+  },
+  {
+   "order": 15,
+   "id": "MAYA",
+   "name": "Maya",
+   "handle": "Maya",
+   "port": 4015,
+   "role": "Agent of Illusion, Simulation, and Perceptual Reality",
+   "lore_policy": {
+    "read": [
+     "all"
+    ],
+    "write": [
+     "simulation",
+     "illusions",
+     "perception"
+    ]
+   }
+  }
+ ]
+}

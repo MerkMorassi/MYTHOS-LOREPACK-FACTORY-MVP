@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mythos.local/schemas/SYS.AI.MAYA.SESAME/query-response.schema.json",
+  "title": "Lorepack player query response",
+  "description": "JSON out. Every response names the pack version it read and carries provenance for every record it used. Errors are values, never exceptions across the boundary.",
+  "type": "object",
+  "required": ["id", "op", "ok", "provenance", "meta"],
+  "properties": {
+    "id": { "type": ["string", "integer", "null"] },
+    "op": { "type": ["string", "null"] },
+    "ok": { "type": "boolean" },
+    "pack": { "$ref": "#/$defs/pack_ref" },
+    "result": { "type": "object", "description": "Op-specific. Shapes in SPEC.md section 4.3; the example session shows each one." },
+    "error": { "$ref": "#/$defs/error" },
+    "provenance": { "type": "array", "items": { "$ref": "#/$defs/provenance" } },
+    "provenance_chain": { "type": "array", "items": { "$ref": "#/$defs/chain_link" }, "description": "Only on peer_ask: one link per agent that answered, outermost first." },
+    "meta": { "type": "object", "required": ["player", "ts"], "properties": { "player": { "type": "string" }, "elapsed_ms": { "type": "integer" }, "ts": { "type": "string" } } }
+  },
+  "allOf": [
+    { "if": { "properties": { "ok": { "const": true } } }, "then": { "required": ["result"] }, "else": { "required": ["error"] } }
+  ],
+  "$defs": {
+    "pack_ref": { "type": "object", "required": ["tag", "version", "agent", "model", "dim"], "properties": { "tag": { "type": "string" }, "version": { "type": "string", "pattern": "^[0-9a-f]{64}$", "description": "recordSetSha256" }, "agent": { "type": "string" }, "model": { "type": ["string", "null"] }, "dim": { "type": ["integer", "null"] } } },
+    "provenance": {
+      "type": "object",
+      "required": ["pack", "version", "agent", "record", "type"],
+      "properties": {
+        "pack": { "type": "string" },
+        "version": { "type": "string" },
+        "agent": { "type": "string" },
+        "record": { "type": ["string", "null"], "description": "Record id; null for pack-level answers (stats, verify, sources)." },
+        "type": { "enum": ["vector", "edge", "pack"] },
+        "source": { "type": ["string", "null"], "description": "Source file the record came from." },
+        "chunk": { "type": "string", "description": "Chunk (vector) id the record belongs to." },
+        "origin": { "type": "string", "description": "Edges: model:<id>, heuristic, or unknown (legacy pack without og)." },
+        "score": { "type": "number" },
+        "matches": { "type": "integer" },
+        "hop": { "type": "integer" }
+      }
+    },
+    "chain_link": { "type": "object", "required": ["hop", "agent", "asked_by", "op", "ok"], "properties": { "hop": { "type": "integer" }, "agent": { "type": "string" }, "asked_by": { "type": "string" }, "op": { "type": "string" }, "pack": { "type": ["string", "null"] }, "version": { "type": ["string", "null"] }, "records": { "type": "array", "items": { "type": "string" } }, "ok": { "type": "boolean" } } },
+    "error": {
+      "type": "object", "required": ["code", "message"],
+      "properties": {
+        "code": { "enum": ["E_BAD_REQUEST", "E_UNKNOWN_OP", "E_NOT_FOUND", "E_NO_EMBEDDER", "E_SPACE_MISMATCH", "E_PACK_INVALID", "E_VERSION", "E_LIMIT", "E_DENIED", "E_LOOP", "E_HOP_LIMIT", "E_DEADLINE", "E_PEER_UNREACHABLE", "E_INTERNAL"] },
+        "message": { "type": "string" },
+        "detail": { "type": "object" }
+      }
+    }
+  }
+}
