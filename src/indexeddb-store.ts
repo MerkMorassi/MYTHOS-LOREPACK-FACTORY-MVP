@@ -1,4 +1,4 @@
-import type { LorepackStore, TripletEdge, VectorRecord } from './types.js';
+import type { LorepackStore, StoredLorepackArchive, TripletEdge, VectorRecord } from './types.js';
 
 const VECTOR_STORE = 'vectors';
 const EDGE_STORE = 'edges';
@@ -400,4 +400,112 @@ export class IndexedDbLorepackStore implements LorepackStore {
       .map(v => v.vector);
   }
 }
+
+/**
+ * Isolated Archive Store for persisting completed Lorepack GZIP archives.
+ * Persists raw Blobs natively into IndexedDB without affecting the primary
+ * vector/edge database schemas.
+ */
+export class IndexedDbArchiveStore {
+  private database: IDBDatabase | null = null;
+  private readonly dbName = 'mythos_archive_vault';
+  private readonly dbVersion = 1;
+  private readonly storeName = 'archives';
+
+  private async open(): Promise<IDBDatabase> {
+    if (this.database) return this.database;
+
+    return new Promise<IDBDatabase>((resolve, reject) => {
+      const request = indexedDB.open(this.dbName, this.dbVersion);
+
+      request.onupgradeneeded = (event: IDBVersionChangeEvent) => {
+        const db = request.result;
+        if (!db.objectStoreNames.contains(this.storeName)) {
+          const store = db.createObjectStore(this.storeName, { keyPath: 'id' });
+          store.createIndex('agentId', 'agentId', { unique: false });
+          store.createIndex('createdAt', 'createdAt', { unique: false });
+        }
+      };
+
+      request.onsuccess = () => {
+        this.database = request.result;
+        this.database.onversionchange = () => {
+          try {
+            this.database?.close();
+          } catch (_) {}
+          this.database = null;
+        };
+        resolve(this.database);
+      };
+
+      request.onerror = () => reject(request.error);
+    });
+  }
+
+  async saveArchive(archive: StoredLorepackArchive): Promise<void> {
+    const db = await this.open();
+    return new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(this.storeName, 'readwrite');
+      const store = tx.objectStore(this.storeName);
+      store.put(archive);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  }
+
+  async getAllArchives(): Promise<StoredLorepackArchive[]> {
+    const db = await this.open();
+    return new Promise<StoredLorepackArchive[]>((resolve, reject) => {
+      const tx = db.transaction(this.storeName, 'readonly');
+      const store = tx.objectStore(this.storeName);
+      const req = store.getAll();
+      req.onsuccess = () => {
+        const res = (req.result as StoredLorepackArchive[]) || [];
+        res.sort((a, b) => b.createdAt - a.createdAt);
+        resolve(res);
+      };
+      req.onerror = () => reject(req.error);
+    });
+  }
+
+  async getArchivesByAgent(agentId: string): Promise<StoredLorepackArchive[]> {
+    const all = await this.getAllArchives();
+    return all.filter((a) => a.agentId.toLowerCase() === agentId.toLowerCase());
+  }
+
+  async getArchiveById(id: string): Promise<StoredLorepackArchive | null> {
+    const db = await this.open();
+    return new Promise<StoredLorepackArchive | null>((resolve, reject) => {
+      const tx = db.transaction(this.storeName, 'readonly');
+      const store = tx.objectStore(this.storeName);
+      const req = store.get(id);
+      req.onsuccess = () => resolve((req.result as StoredLorepackArchive) || null);
+      req.onerror = () => reject(req.error);
+    });
+  }
+
+  async deleteArchive(id: string): Promise<void> {
+    const db = await this.open();
+    return new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(this.storeName, 'readwrite');
+      const store = tx.objectStore(this.storeName);
+      store.delete(id);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  }
+
+  async clearArchives(): Promise<void> {
+    const db = await this.open();
+    return new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(this.storeName, 'readwrite');
+      const store = tx.objectStore(this.storeName);
+      store.clear();
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  }
+}
+
+export const archiveStore = new IndexedDbArchiveStore();
 

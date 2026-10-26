@@ -121,6 +121,39 @@ export interface OptimizationConfig {
   graphThreshold?: number;
 }
 
+export interface StoredLorepackArchive {
+  id: string;
+  filename: string;
+  agentId: string;
+  agentHandle: string;
+  recordCount: number;
+  edgeCount: number;
+  sizeBytes: number;
+  createdAt: number;
+  blob: Blob;
+  description?: string;
+}
+
+export interface WebhookSyncConfig {
+  url: string;
+  secret?: string;
+  autoSyncOnExport: boolean;
+  autoSyncOnIngest: boolean;
+  active: boolean;
+}
+
+export interface WebhookDeliveryLog {
+  id: string;
+  timestamp: number;
+  url: string;
+  event: 'test_ping' | 'export_gz' | 'vectors_stream' | 'archive_push';
+  status: 'success' | 'failed';
+  statusCode?: number;
+  durationMs: number;
+  payloadSize: number;
+  detail?: string;
+}
+
 export interface KernelSnapshot {
   id: string;
   name: string;
@@ -136,3 +169,4 @@ export interface KernelSnapshot {
     systemPrompt?: string;
   };
 }
+

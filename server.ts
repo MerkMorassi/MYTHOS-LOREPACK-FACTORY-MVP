@@ -548,6 +548,63 @@ ${text}`,
     res.json({ status: globalServiceStatus });
   });
 
+  // API Route: Outbound Webhook Dispatch Proxy (Bypasses browser CORS & secures outbound sync)
+  app.post('/api/lorepack/webhook-dispatch', requireBuilderAuth, async (req, res) => {
+    const { url, secret, payload, headers: customHeaders } = req.body || {};
+    if (!url || typeof url !== 'string' || (!url.startsWith('http://') && !url.startsWith('https://'))) {
+      res.status(400).json({ success: false, error: 'Valid HTTP/HTTPS target URL is required.' });
+      return;
+    }
+
+    const startTime = Date.now();
+    try {
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+        'User-Agent': 'MythOS-Lorepack-Webhook-Sync/1.0',
+        ...(customHeaders || {}),
+      };
+
+      if (secret) {
+        headers['Authorization'] = `Bearer ${secret}`;
+        headers['X-Lorepack-Secret'] = secret;
+      }
+
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 12000);
+
+      const response = await fetch(url, {
+        method: 'POST',
+        headers,
+        body: typeof payload === 'string' ? payload : JSON.stringify(payload),
+        signal: controller.signal,
+      });
+
+      clearTimeout(timeoutId);
+      const durationMs = Date.now() - startTime;
+      const responseText = await response.text();
+
+      let parsedData: any = responseText;
+      try {
+        parsedData = JSON.parse(responseText);
+      } catch {}
+
+      res.json({
+        success: response.ok,
+        statusCode: response.status,
+        statusText: response.statusText,
+        durationMs,
+        response: parsedData,
+      });
+    } catch (err: any) {
+      const durationMs = Date.now() - startTime;
+      res.status(502).json({
+        success: false,
+        error: err.name === 'AbortError' ? 'Webhook dispatch timed out after 12s' : (err.message || 'Webhook dispatch failed'),
+        durationMs,
+      });
+    }
+  });
+
   // Health check endpoints (both /health and /api/health)
   app.get(['/health', '/api/health'], (req, res) => {
     res.json({

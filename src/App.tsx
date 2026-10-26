@@ -4,9 +4,9 @@
  */
 import React, { useEffect, useState, useRef } from 'react';
 import { LorepackFactory } from './lorepack-factory.ts';
-import { IndexedDbLorepackStore } from './indexeddb-store.ts';
+import { IndexedDbLorepackStore, archiveStore } from './indexeddb-store.ts';
 import { GeminiProvider } from './providers/gemini-provider.ts';
-import type { VectorRecord, TripletEdge, KernelSnapshot } from './types.ts';
+import type { VectorRecord, TripletEdge, KernelSnapshot, StoredLorepackArchive, WebhookDeliveryLog } from './types.ts';
 import { 
   CANONICAL_MYTHOS_AGENTS, 
   DEFAULT_CANONICAL_AGENT, 
@@ -60,7 +60,11 @@ import {
   LogOut,
   ShieldCheck,
   Share2,
-  Files
+  Files,
+  Globe,
+  Radio,
+  FileArchive,
+  UploadCloud,
 } from 'lucide-react';
 
 export interface AgentCustomOverride {
@@ -234,6 +238,38 @@ export default function App() {
       return [];
     }
   });
+
+  // Webhook Sync State
+  const [webhookUrl, setWebhookUrl] = useState<string>(() => {
+    try {
+      return localStorage.getItem('mythos_webhook_url') || '';
+    } catch {
+      return '';
+    }
+  });
+  const [webhookSecret, setWebhookSecret] = useState<string>(() => {
+    try {
+      return localStorage.getItem('mythos_webhook_secret') || '';
+    } catch {
+      return '';
+    }
+  });
+  const [autoSyncOnExport, setAutoSyncOnExport] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('mythos_webhook_auto_sync') === 'true';
+    } catch {
+      return false;
+    }
+  });
+  const [isSyncingWebhook, setIsSyncingWebhook] = useState<boolean>(false);
+  const [webhookLogs, setWebhookLogs] = useState<WebhookDeliveryLog[]>([]);
+  const lastArchiveTransmissionRef = useRef<{ blob: Blob; filename: string; targetAgentId: string } | null>(null);
+  const [hasFailedArchiveTransmission, setHasFailedArchiveTransmission] = useState<boolean>(false);
+
+  // Stored Archives Vault State
+  const [storedArchives, setStoredArchives] = useState<StoredLorepackArchive[]>([]);
+  const [loadingArchives, setLoadingArchives] = useState<boolean>(false);
+  const archiveUploadRefApp = useRef<HTMLInputElement>(null);
 
   // --- 2. LOGGING HELPER ---
   const log = (msg: string) => {
@@ -1106,6 +1142,31 @@ export default function App() {
 
       log(`[EXPORT]: Success. Extracted and gated ${exportResult.count} blocks into ${exportResult.filename}.`);
 
+      // Auto-save to Local GZ Archive Vault
+      try {
+        await archiveStore.saveArchive({
+          id: `arch_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+          filename: exportResult.filename,
+          agentId,
+          agentHandle,
+          recordCount: exportResult.count,
+          edgeCount: stats.totalEdges,
+          sizeBytes: exportResult.blob.size,
+          createdAt: Date.now(),
+          blob: exportResult.blob,
+          description: `Direct export for ${agentHandle} (${agentId})`,
+        });
+        fetchAppArchives();
+        log(`[VAULT]: Preserved archive "${exportResult.filename}" in Local GZ Vault.`);
+      } catch (vaultErr) {
+        console.warn('Failed to auto-vault archive:', vaultErr);
+      }
+
+      if (autoSyncOnExport && webhookUrl.trim()) {
+        log(`[WEBHOOK SYNC]: Auto-syncing export to ${webhookUrl}...`);
+        dispatchWebhookGzip(exportResult.blob, exportResult.filename, agentId);
+      }
+
       // Auto-hide progress indicator after 5 seconds of completion
       setTimeout(() => {
         setExportProgress((prev) => ({ ...prev, active: false }));
@@ -1117,6 +1178,7 @@ export default function App() {
       setExporting(false);
     }
   };
+
 
   // 7. Handle Import Sequence
   const handleImportFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -1332,6 +1394,398 @@ export default function App() {
       setIsNuking(false);
     }
   };
+
+  // ------------------------------------------------------------
+  // ARCHIVE VAULT & WEBHOOK SYNC HANDLERS (App Root)
+  // ------------------------------------------------------------
+  const fetchAppArchives = async () => {
+    setLoadingArchives(true);
+    try {
+      const all = await archiveStore.getAllArchives();
+      setStoredArchives(all);
+    } catch (err) {
+      console.warn('Failed to load archives from vault:', err);
+    } finally {
+      setLoadingArchives(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchAppArchives();
+  }, [agentId]);
+
+  const handleReloadArchiveIntoLocus = async (archive: StoredLorepackArchive) => {
+    if (!factory) {
+      log('[ERROR]: Factory kernel not initialized.');
+      return;
+    }
+    log(`[VAULT]: Reloading archive "${archive.filename}" into locus ${agentId}...`);
+    try {
+      setImportProgress({ processed: 0, vectors: 0, edges: 0, active: true });
+      const result = await factory.importLorepack(archive.blob, agentId, (p) => {
+        setImportProgress({
+          processed: p.processed,
+          vectors: p.vectors,
+          edges: p.edges,
+          active: true,
+        });
+      });
+      log(`[VAULT_RELOAD_SUCCESS]: Restored ${result.importedVectors} vectors, ${result.importedEdges} edges from "${archive.filename}" into ${agentId}.`);
+      await refreshExplorer();
+    } catch (err: any) {
+      log(`[VAULT_RELOAD_ERROR]: ${err.message || err}`);
+    } finally {
+      setImportProgress((p) => ({ ...p, active: false }));
+    }
+  };
+
+  const handleDownloadArchive = (archive: StoredLorepackArchive) => {
+    const url = URL.createObjectURL(archive.blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = archive.filename;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+    log(`[VAULT]: Downloaded archive "${archive.filename}" (${Math.round(archive.sizeBytes / 1024)} KB).`);
+  };
+
+  const handleDeleteArchive = async (id: string, filename: string) => {
+    try {
+      await archiveStore.deleteArchive(id);
+      await fetchAppArchives();
+      log(`[VAULT]: Pruned archive "${filename}" from vault.`);
+    } catch (err: any) {
+      log(`[VAULT_ERROR]: ${err.message || err}`);
+    }
+  };
+
+  const handleUploadArchiveToVault = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!e.target.files || e.target.files.length === 0) return;
+    const file = e.target.files[0];
+    log(`[VAULT]: Storing external archive file "${file.name}"...`);
+    try {
+      const match = file.name.match(/lorepack_([a-zA-Z0-9]+)/i);
+      const parsedAgentId = match ? match[1].toUpperCase() : agentId;
+
+      await archiveStore.saveArchive({
+        id: `arch_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+        filename: file.name,
+        agentId: parsedAgentId,
+        agentHandle,
+        recordCount: 0,
+        edgeCount: 0,
+        sizeBytes: file.size,
+        createdAt: Date.now(),
+        blob: file,
+        description: `External archive intake "${file.name}"`,
+      });
+      await fetchAppArchives();
+      log(`[VAULT]: Preserved "${file.name}" in local vault (${Math.round(file.size / 1024)} KB). Ready for reload.`);
+    } catch (err: any) {
+      log(`[VAULT_ERROR]: Failed to store archive: ${err.message || err}`);
+    } finally {
+      if (archiveUploadRefApp.current) archiveUploadRefApp.current.value = '';
+    }
+  };
+
+  const handleSaveWebhookConfig = (url: string, secret: string, autoSync: boolean) => {
+    setWebhookUrl(url);
+    setWebhookSecret(secret);
+    setAutoSyncOnExport(autoSync);
+    try {
+      localStorage.setItem('mythos_webhook_url', url);
+      localStorage.setItem('mythos_webhook_secret', secret);
+      localStorage.setItem('mythos_webhook_auto_sync', autoSync ? 'true' : 'false');
+    } catch {}
+    log(`[WEBHOOK SYNC]: Configuration saved (${url ? 'Active' : 'No URL'}).`);
+  };
+
+  const dispatchWebhookGzip = async (blob: Blob, filename: string, targetAgentId: string) => {
+    if (!webhookUrl.trim()) return;
+    lastArchiveTransmissionRef.current = { blob, filename, targetAgentId };
+    setIsSyncingWebhook(true);
+    const start = Date.now();
+    try {
+      const buffer = await blob.arrayBuffer();
+      const bytes = new Uint8Array(buffer);
+      let binary = '';
+      for (let i = 0; i < bytes.byteLength; i++) {
+        binary += String.fromCharCode(bytes[i]);
+      }
+      const base64 = btoa(binary);
+
+      const payload = {
+        event: 'export_gz',
+        timestamp: Date.now(),
+        agentId: targetAgentId,
+        agentHandle,
+        locus: `MYTHOS.LORE.${targetAgentId}`,
+        filename,
+        sizeBytes: blob.size,
+        format: 'lorepack.gz',
+        archiveBase64: base64,
+      };
+
+      const res = await fetch('/api/lorepack/webhook-dispatch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          url: webhookUrl.trim(),
+          secret: webhookSecret.trim() || undefined,
+          payload,
+        }),
+      });
+
+      const data = await res.json();
+      const durationMs = Date.now() - start;
+
+      const logEntry: WebhookDeliveryLog = {
+        id: `wh_${Date.now()}`,
+        timestamp: Date.now(),
+        url: webhookUrl.trim(),
+        event: 'export_gz',
+        status: res.ok && data.success ? 'success' : 'failed',
+        statusCode: data.statusCode || res.status,
+        durationMs,
+        payloadSize: blob.size,
+        detail: data.success ? 'GZIP Lorepack delivered' : (data.error || 'Dispatch returned failure'),
+      };
+
+      setWebhookLogs((prev) => [logEntry, ...prev.slice(0, 19)]);
+
+      if (res.ok && data.success) {
+        setHasFailedArchiveTransmission(false);
+        log(`[WEBHOOK SYNC]: Successfully pushed "${filename}" to ${webhookUrl} (${durationMs}ms, HTTP ${data.statusCode})`);
+      } else {
+        setHasFailedArchiveTransmission(true);
+        log(`[WEBHOOK SYNC]: Delivery failed to ${webhookUrl}: ${data.error || res.statusText}`);
+      }
+    } catch (err: any) {
+      setHasFailedArchiveTransmission(true);
+      const durationMs = Date.now() - start;
+      const logEntry: WebhookDeliveryLog = {
+        id: `wh_${Date.now()}`,
+        timestamp: Date.now(),
+        url: webhookUrl.trim(),
+        event: 'export_gz',
+        status: 'failed',
+        statusCode: 0,
+        durationMs,
+        payloadSize: blob.size,
+        detail: err.message,
+      };
+      setWebhookLogs((prev) => [logEntry, ...prev.slice(0, 19)]);
+      log(`[WEBHOOK SYNC ERROR]: ${err.message}`);
+    } finally {
+      setIsSyncingWebhook(false);
+    }
+  };
+
+  const handleTestWebhookPing = async () => {
+    if (!webhookUrl.trim()) {
+      log('[WEBHOOK_ERROR]: Webhook URL required. Configure destination in Webhook Sync.');
+      return;
+    }
+    setIsSyncingWebhook(true);
+    log(`[WEBHOOK SYNC]: Sending test ping to ${webhookUrl}...`);
+    const start = Date.now();
+    try {
+      const payload = {
+        event: 'test_ping',
+        timestamp: Date.now(),
+        service: 'MythOS Lorepack Factory',
+        agentId,
+        agentHandle,
+        locus: `MYTHOS.LORE.${agentId}`,
+        status: 'operational',
+      };
+
+      const res = await fetch('/api/lorepack/webhook-dispatch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          url: webhookUrl.trim(),
+          secret: webhookSecret.trim() || undefined,
+          payload,
+        }),
+      });
+
+      const data = await res.json();
+      const durationMs = Date.now() - start;
+
+      const logEntry: WebhookDeliveryLog = {
+        id: `wh_${Date.now()}`,
+        timestamp: Date.now(),
+        url: webhookUrl.trim(),
+        event: 'test_ping',
+        status: res.ok && data.success ? 'success' : 'failed',
+        statusCode: data.statusCode || res.status,
+        durationMs,
+        payloadSize: JSON.stringify(payload).length,
+        detail: data.success ? 'Ping acknowledged' : (data.error || 'Ping failed'),
+      };
+
+      setWebhookLogs((prev) => [logEntry, ...prev.slice(0, 19)]);
+
+      if (res.ok && data.success) {
+        log(`[WEBHOOK PING SUCCESS]: Acknowledged by ${webhookUrl} (HTTP ${data.statusCode}, ${durationMs}ms)`);
+      } else {
+        log(`[WEBHOOK PING FAILED]: ${webhookUrl} responded with ${data.error || `HTTP ${data.statusCode}`}`);
+      }
+    } catch (err: any) {
+      const durationMs = Date.now() - start;
+      const logEntry: WebhookDeliveryLog = {
+        id: `wh_${Date.now()}`,
+        timestamp: Date.now(),
+        url: webhookUrl.trim(),
+        event: 'test_ping',
+        status: 'failed',
+        statusCode: 0,
+        durationMs,
+        payloadSize: 0,
+        detail: err.message,
+      };
+      setWebhookLogs((prev) => [logEntry, ...prev.slice(0, 19)]);
+      log(`[WEBHOOK PING ERROR]: ${err.message}`);
+    } finally {
+      setIsSyncingWebhook(false);
+    }
+  };
+
+  const handlePushCurrentLocusGzip = async () => {
+    if (!factory) return;
+    if (!webhookUrl.trim()) {
+      log('[WEBHOOK_ERROR]: Webhook URL required. Configure destination in Webhook Sync.');
+      return;
+    }
+    log(`[WEBHOOK SYNC]: Compiling current locus GZIP archive for webhook push...`);
+    try {
+      const { blob, count, filename } = await factory.exportToGz(agentId);
+      log(`[WEBHOOK SYNC]: Compiled ${filename} (${Math.round(blob.size / 1024)} KB, ${count} records). Pushing...`);
+      await dispatchWebhookGzip(blob, filename, agentId);
+    } catch (err: any) {
+      log(`[WEBHOOK ERROR]: Failed to compile/push archive: ${err.message}`);
+    }
+  };
+
+  const handlePushVectorsStream = async () => {
+    if (!webhookUrl.trim()) {
+      log('[WEBHOOK_ERROR]: Webhook URL required. Configure destination in Webhook Sync.');
+      return;
+    }
+    if (!store) return;
+    setIsSyncingWebhook(true);
+    log(`[WEBHOOK SYNC]: Streaming vectors for agent ${agentId} to ${webhookUrl}...`);
+    const start = Date.now();
+    try {
+      const vectors = await store.getVectorsByAgent(agentId);
+      const edges = await store.getTripletEdgesByAgent(agentId);
+
+      const payload = {
+        event: 'vectors_stream',
+        timestamp: Date.now(),
+        agentId,
+        agentHandle,
+        locus: `MYTHOS.LORE.${agentId}`,
+        vectorCount: vectors.length,
+        edgeCount: edges.length,
+        vectors: vectors.map((v) => ({
+          id: v.id,
+          text: v.text,
+          source: v.source,
+          timestamp: v.timestamp,
+          metadata: v.metadata,
+          dimension: Array.isArray(v.vector) ? v.vector.length : 0,
+        })),
+        edges: edges.map((e) => ({
+          id: e.id,
+          s: e.s,
+          r: e.r,
+          o: e.o,
+        })),
+      };
+
+      const payloadStr = JSON.stringify(payload);
+      const res = await fetch('/api/lorepack/webhook-dispatch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          url: webhookUrl.trim(),
+          secret: webhookSecret.trim() || undefined,
+          payload,
+        }),
+      });
+
+      const data = await res.json();
+      const durationMs = Date.now() - start;
+
+      const logEntry: WebhookDeliveryLog = {
+        id: `wh_${Date.now()}`,
+        timestamp: Date.now(),
+        url: webhookUrl.trim(),
+        event: 'vectors_stream',
+        status: res.ok && data.success ? 'success' : 'failed',
+        statusCode: data.statusCode || res.status,
+        durationMs,
+        payloadSize: payloadStr.length,
+        detail: data.success ? `Streamed ${vectors.length} vectors, ${edges.length} edges` : (data.error || 'Failed'),
+      };
+
+      setWebhookLogs((prev) => [logEntry, ...prev.slice(0, 19)]);
+
+      if (res.ok && data.success) {
+        log(`[WEBHOOK SYNC]: Streamed ${vectors.length} vectors & ${edges.length} edges to ${webhookUrl} (HTTP ${data.statusCode}, ${durationMs}ms)`);
+      } else {
+        log(`[WEBHOOK SYNC]: Vector stream failed: ${data.error || res.statusText}`);
+      }
+    } catch (err: any) {
+      const durationMs = Date.now() - start;
+      const logEntry: WebhookDeliveryLog = {
+        id: `wh_${Date.now()}`,
+        timestamp: Date.now(),
+        url: webhookUrl.trim(),
+        event: 'vectors_stream',
+        status: 'failed',
+        statusCode: 0,
+        durationMs,
+        payloadSize: 0,
+        detail: err.message,
+      };
+      setWebhookLogs((prev) => [logEntry, ...prev.slice(0, 19)]);
+      log(`[WEBHOOK SYNC ERROR]: ${err.message}`);
+    } finally {
+      setIsSyncingWebhook(false);
+    }
+  };
+
+  const handlePushArchiveToWebhook = async (archive: StoredLorepackArchive) => {
+    if (!webhookUrl.trim()) {
+      log('[WEBHOOK_ERROR]: Webhook URL required. Configure destination in Webhook Sync.');
+      return;
+    }
+    log(`[WEBHOOK SYNC]: Pushing stored vault archive "${archive.filename}" to webhook ${webhookUrl}...`);
+    await dispatchWebhookGzip(archive.blob, archive.filename, archive.agentId);
+  };
+
+  const handleReplayLastDispatch = async () => {
+    if (!webhookUrl.trim()) {
+      log('[WEBHOOK_ERROR]: Webhook URL required. Configure destination in Webhook Sync.');
+      return;
+    }
+    if (isSyncingWebhook) return;
+
+    if (lastArchiveTransmissionRef.current) {
+      const { blob, filename, targetAgentId } = lastArchiveTransmissionRef.current;
+      log(`[WEBHOOK REPLAY]: Re-dispatching most recent archive transmission "${filename}" (${Math.round(blob.size / 1024)} KB) to ${webhookUrl}...`);
+      await dispatchWebhookGzip(blob, filename, targetAgentId);
+    } else {
+      log(`[WEBHOOK REPLAY]: No cached archive dispatch found in session. Compiling active locus ${agentId} for re-dispatch to ${webhookUrl}...`);
+      await handlePushCurrentLocusGzip();
+    }
+  };
+
 
   // Sacred Architectural Anchors & Compatibility Bindings
   const runExport = handleExportLorepack;
@@ -1688,6 +2142,25 @@ export default function App() {
         a.click();
         document.body.removeChild(a);
         URL.revokeObjectURL(url);
+
+        // Auto-preserve in Archive Vault for hot-reload
+        try {
+          await archiveStore.saveArchive({
+            id: `arch_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+            filename: finalExport.filename,
+            agentId,
+            agentHandle,
+            recordCount: finalExport.count,
+            edgeCount: stats.totalEdges,
+            sizeBytes: finalExport.blob.size,
+            createdAt: Date.now(),
+            blob: finalExport.blob,
+            description: `Auto-Ship Pipeline distribution payload for ${agentHandle} (${agentId})`,
+          });
+          pipeLog(`Preserved distribution archive in Local GZ Vault: ${finalExport.filename}`, 'ok');
+        } catch (vaultErr) {
+          console.warn('Failed to auto-vault shipped archive:', vaultErr);
+        }
         
         updateStep('ship', { status: 'completed', progress: 100, detail: 'Lorepack Shipped.' });
         setPipeline(prev => ({ 
@@ -1971,9 +2444,254 @@ export default function App() {
             )}
           </div>
         )}
+        {/* Remote Locus Webhook Sync Settings */}
+        <div className="border-t border-neutral-800 pt-4 flex flex-col gap-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Globe className="h-4 w-4 text-sky-400" />
+              <h3 className="text-xs font-bold text-white uppercase tracking-wider">Remote Locus Webhook Sync</h3>
+            </div>
+            <span className={`text-[9px] font-mono font-bold px-2 py-0.5 rounded border ${webhookUrl.trim() ? 'bg-emerald-950/80 border-emerald-800 text-emerald-400' : 'bg-neutral-950 border-neutral-800 text-neutral-500'}`}>
+              {webhookUrl.trim() ? 'CONFIGURED' : 'STANDBY'}
+            </span>
+          </div>
+
+          <p className="text-[11px] text-neutral-400 leading-relaxed font-mono">
+            Stream real-time vector updates or push compiled GZIP archives to external remote endpoints or ingest pipelines.
+          </p>
+
+          <div className="space-y-2">
+            <div>
+              <label className="block text-[10px] text-neutral-400 uppercase tracking-wider mb-1 font-semibold">
+                Outbound Webhook Destination URL
+              </label>
+              <input
+                type="url"
+                value={webhookUrl}
+                onChange={(e) => setWebhookUrl(e.target.value)}
+                placeholder="https://remote-service.com/webhook"
+                className="w-full bg-neutral-950 text-neutral-200 border border-neutral-800 px-3 py-1.5 rounded font-mono text-xs focus:outline-none focus:border-neutral-700"
+              />
+            </div>
+
+            <div>
+              <label className="block text-[10px] text-neutral-400 uppercase tracking-wider mb-1 font-semibold">
+                Authorization Token / Secret (Bearer Header)
+              </label>
+              <input
+                type="password"
+                value={webhookSecret}
+                onChange={(e) => setWebhookSecret(e.target.value)}
+                placeholder="Optional bearer token or secret..."
+                className="w-full bg-neutral-950 text-neutral-200 border border-neutral-800 px-3 py-1.5 rounded font-mono text-xs focus:outline-none focus:border-neutral-700"
+              />
+            </div>
+
+            <div className="flex items-center justify-between bg-neutral-950 border border-neutral-800 p-2.5 rounded">
+              <label className="text-[11px] text-neutral-300 font-bold flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={autoSyncOnExport}
+                  onChange={(e) => setAutoSyncOnExport(e.target.checked)}
+                  className="accent-emerald-500 cursor-pointer"
+                />
+                <span>Auto-Sync on GZ Export</span>
+              </label>
+              <button
+                type="button"
+                onClick={() => handleSaveWebhookConfig(webhookUrl, webhookSecret, autoSyncOnExport)}
+                className="bg-neutral-800 hover:bg-neutral-700 text-white px-2.5 py-1 text-[10px] font-bold uppercase rounded transition-colors"
+              >
+                Save Sync Config
+              </button>
+            </div>
+
+            <div className="grid grid-cols-3 gap-2 pt-1">
+              <button
+                type="button"
+                disabled={isSyncingWebhook || !webhookUrl.trim()}
+                onClick={handleTestWebhookPing}
+                className="bg-neutral-950 hover:bg-neutral-800 border border-neutral-800 hover:border-sky-500 text-sky-400 disabled:opacity-40 py-2 px-2 text-[10px] font-bold uppercase rounded transition-colors cursor-pointer text-center"
+              >
+                Test Ping
+              </button>
+              <button
+                type="button"
+                disabled={isSyncingWebhook || !webhookUrl.trim()}
+                onClick={handlePushCurrentLocusGzip}
+                className="bg-neutral-950 hover:bg-neutral-800 border border-neutral-800 hover:border-emerald-500 text-emerald-400 disabled:opacity-40 py-2 px-2 text-[10px] font-bold uppercase rounded transition-colors cursor-pointer text-center"
+              >
+                Push Locus (.GZ)
+              </button>
+              <button
+                type="button"
+                disabled={isSyncingWebhook || !webhookUrl.trim()}
+                onClick={handlePushVectorsStream}
+                className="bg-neutral-950 hover:bg-neutral-800 border border-neutral-800 hover:border-blue-500 text-blue-400 disabled:opacity-40 py-2 px-2 text-[10px] font-bold uppercase rounded transition-colors cursor-pointer text-center"
+              >
+                Stream Vectors
+              </button>
+            </div>
+
+            {/* Delivery Logs & Replay Action */}
+            <div className="flex flex-col gap-1.5 border-t border-neutral-800 pt-2">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[9px] uppercase tracking-wider text-neutral-500 font-bold">
+                  Recent Webhook Deliveries:
+                </span>
+                <button
+                  id="replayDispatchBtn"
+                  type="button"
+                  disabled={isSyncingWebhook || !webhookUrl.trim()}
+                  onClick={handleReplayLastDispatch}
+                  className={`px-2 py-0.5 text-[9px] font-mono font-bold uppercase rounded border transition-colors flex items-center gap-1 cursor-pointer ${
+                    hasFailedArchiveTransmission
+                      ? 'bg-rose-950/80 border-rose-500 hover:border-rose-400 text-rose-300 animate-pulse'
+                      : 'bg-neutral-900 border-neutral-700 hover:border-neutral-500 text-neutral-300'
+                  } disabled:opacity-40 disabled:cursor-not-allowed`}
+                  title={hasFailedArchiveTransmission ? "Re-push most recent failed archive transmission" : "Replay last archive transmission"}
+                >
+                  <RefreshCw className={`w-2.5 h-2.5 ${isSyncingWebhook ? 'animate-spin text-sky-400' : ''}`} />
+                  Replay Last Dispatch
+                </button>
+              </div>
+
+              {webhookLogs.length > 0 ? (
+                <div className="flex flex-col gap-1 max-h-24 overflow-y-auto font-mono text-[9px]">
+                  {webhookLogs.slice(0, 5).map((l) => (
+                    <div key={l.id} className="bg-neutral-950 p-1.5 border border-neutral-800/80 rounded flex justify-between items-center">
+                      <span className={l.status === 'success' ? 'text-emerald-400' : 'text-rose-400'}>
+                        [{l.event}] {l.status === 'success' ? `HTTP ${l.statusCode}` : 'FAILED'}
+                      </span>
+                      <span className="text-neutral-500">{l.durationMs}ms</span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-[9px] text-neutral-600 font-mono italic py-0.5">
+                  No webhook delivery attempts recorded yet.
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* Stored Lorepack Archives (.GZ Vault) */}
+        <div className="border-t border-neutral-800 pt-4 flex flex-col gap-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <FileArchive className="h-4 w-4 text-emerald-400" />
+              <h3 className="text-xs font-bold text-white uppercase tracking-wider">Stored Archives (.GZ Vault)</h3>
+            </div>
+            <span className="text-[9px] font-mono font-bold bg-emerald-950 border border-emerald-800 text-emerald-400 px-2 py-0.5 rounded">
+              [{storedArchives.length} STORED]
+            </span>
+          </div>
+
+          <div className="flex gap-2">
+            <input
+              ref={archiveUploadRefApp}
+              type="file"
+              accept=".gz,.lorepack,.jsonl,.json"
+              onChange={handleUploadArchiveToVault}
+              className="hidden"
+            />
+            <button
+              type="button"
+              onClick={() => archiveUploadRefApp.current?.click()}
+              className="flex-1 bg-neutral-950 hover:bg-neutral-850 border border-neutral-800 hover:border-neutral-700 text-neutral-300 py-1.5 px-3 rounded text-[10px] font-bold uppercase tracking-wider flex items-center justify-center gap-1.5 cursor-pointer"
+            >
+              <UploadCloud className="w-3.5 h-3.5 text-emerald-400" />
+              <span>Store Archive to Vault</span>
+            </button>
+            <button
+              type="button"
+              onClick={fetchAppArchives}
+              disabled={loadingArchives}
+              className="bg-neutral-950 hover:bg-neutral-850 border border-neutral-800 text-neutral-400 hover:text-white p-1.5 rounded cursor-pointer"
+              title="Refresh Vault Archives"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${loadingArchives ? 'animate-spin' : ''}`} />
+            </button>
+          </div>
+
+          <div className="flex flex-col gap-2 max-h-56 overflow-y-auto pr-1">
+            {storedArchives.length === 0 ? (
+              <div className="text-[10px] text-neutral-600 italic py-4 text-center border border-dashed border-neutral-800 rounded">
+                No stored archives in local vault. Export a .gz archive to preserve it for hot-reload.
+              </div>
+            ) : (
+              storedArchives.map((arch) => {
+                const isCurrentAgent = arch.agentId.toLowerCase() === agentId.toLowerCase();
+                const dateStr = new Date(arch.createdAt).toLocaleDateString([], { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+                const sizeKb = Math.round(arch.sizeBytes / 1024);
+
+                return (
+                  <div
+                    key={arch.id}
+                    className={`bg-neutral-950 border p-2.5 rounded flex flex-col gap-2 transition-colors ${
+                      isCurrentAgent ? 'border-emerald-800/80 shadow-sm shadow-emerald-950/50' : 'border-neutral-800'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="text-[11px] font-bold text-white font-mono truncate max-w-[200px]" title={arch.filename}>
+                        {arch.filename}
+                      </span>
+                      <span className="text-[8px] px-1.5 py-0.5 bg-neutral-900 border border-neutral-700 text-neutral-300 font-mono font-bold rounded">
+                        {arch.agentId}
+                      </span>
+                    </div>
+
+                    <div className="flex justify-between items-center text-[9px] text-neutral-500 font-mono">
+                      <span>{sizeKb} KB {arch.recordCount > 0 ? `| ${arch.recordCount} recs` : ''}</span>
+                      <span>{dateStr}</span>
+                    </div>
+
+                    <div className="grid grid-cols-4 gap-1.5 pt-1 border-t border-neutral-900">
+                      <button
+                        type="button"
+                        onClick={() => handleReloadArchiveIntoLocus(arch)}
+                        className="col-span-2 bg-emerald-950 hover:bg-emerald-900 border border-emerald-700 text-emerald-300 py-1 px-1.5 text-[9px] font-bold uppercase rounded cursor-pointer text-center"
+                        title="Reload archive directly into active agent locus"
+                      >
+                        Reload Locus
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleDownloadArchive(arch)}
+                        className="bg-neutral-900 hover:bg-neutral-800 border border-neutral-800 text-neutral-300 py-1 px-1 text-[9px] font-bold uppercase rounded cursor-pointer text-center"
+                      >
+                        Get .GZ
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handlePushArchiveToWebhook(arch)}
+                        disabled={isSyncingWebhook || !webhookUrl.trim()}
+                        className="bg-neutral-900 hover:bg-neutral-800 border border-neutral-800 text-sky-400 disabled:opacity-30 py-1 px-1 text-[9px] font-bold uppercase rounded cursor-pointer text-center"
+                      >
+                        Sync
+                      </button>
+                    </div>
+
+                    <div className="flex justify-end">
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteArchive(arch.id, arch.filename)}
+                        className="text-[9px] text-neutral-600 hover:text-rose-400 font-mono underline cursor-pointer"
+                      >
+                        Delete from Vault
+                      </button>
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </div>
       </div>
     </section>
   );
+
 
   const testMatrixModule = (
     <section className="bg-neutral-900 border border-neutral-800 rounded flex flex-col">
