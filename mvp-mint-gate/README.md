@@ -1,8 +1,14 @@
 # MVP-MINT-GATE — space-contract patch chip for MYTHOS-LOREPACK-FACTORY-MVP
 
-Drop-in: copy `mint-gate.ts` into the MVP repo's `src/` (zero deps, no imports
-from the repo). Then wire it with the five edits below. Nothing here invents
-vectors, nothing ships partial packs.
+Status (claims audit, 2026-11-05): `src/mint-gate.ts` is in the repo and wired
+into `gemini-provider.ts`, `packer.ts` and `MintChip.tsx`. The main export path
+(`factory.exportLorepack`) runs `assertSingleSpace`. The auto-save archive in
+`App.tsx` (`performAutoSaveArchive`) still uses `yieldExportBatches`, which checks
+orphan edges but not single-space, so a mixed store can still reach that archive.
+
+Original drop-in notes: copy `mint-gate.ts` into the MVP repo's `src/` (zero
+deps, no imports from the repo). Then wire it with the five edits below. The
+chip invents no vectors on the paths it gates.
 
 What it holds: `PINNED_MODEL`/`PINNED_DIM` (768-D `gemini-embedding-2`),
 typed refusals (`MintRefusedError`, `QuotaError` with server `retry in Ns`,
@@ -54,7 +60,8 @@ assertSingleSpace(
 );
 ```
 
-A mixed store now refuses at export instead of shipping.
+A mixed store now refuses at `exportLorepack` instead of shipping (the
+auto-save archive path is not gated yet; see Status above).
 
 ## Edit 4 — `src/App.tsx` `handleExportLorepack`: use the gated path
 

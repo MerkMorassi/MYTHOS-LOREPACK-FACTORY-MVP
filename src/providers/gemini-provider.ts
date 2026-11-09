@@ -2,61 +2,7 @@ import type { LorepackModel, Triplet } from '../types.ts';
 import { embedBatchPinned, PINNED_MODEL, SUPPORTED_EMBEDDING_MODELS } from '../mint-gate.js';
 
 const EMBEDDING_MODEL = PINNED_MODEL;
-const FALLBACK_EMBEDDING_MODEL = 'gemini-embedding-001';
 const GENERATION_MODEL = 'gemini-3.1-flash-lite';
-
-export function generateDeterministicEmbedding(text: string, dimension = 768): number[] {
-  const vec = new Float64Array(dimension);
-  const clean = (text || '').toLowerCase().trim();
-  if (!clean) {
-    vec[0] = 1.0;
-    return Array.from(vec);
-  }
-
-  const words = clean.split(/\s+/).filter(Boolean);
-
-  const hashString = (str: string, seed = 0): number => {
-    let h = 0x811c9dc5 ^ seed;
-    for (let i = 0; i < str.length; i++) {
-      h ^= str.charCodeAt(i);
-      h = Math.imul(h, 0x01000193);
-    }
-    return Math.abs(h);
-  };
-
-  for (let i = 0; i < words.length; i++) {
-    const word = words[i];
-    const weight = 1.0 / Math.sqrt(i + 1);
-    for (let seed = 0; seed < 4; seed++) {
-      const idx = hashString(word, seed) % dimension;
-      const sign = hashString(word, seed + 10) % 2 === 0 ? 1 : -1;
-      vec[idx] += weight * sign;
-    }
-  }
-
-  const n = 3;
-  for (let i = 0; i <= clean.length - n; i++) {
-    const gram = clean.slice(i, i + n);
-    const idx = hashString(gram, 13) % dimension;
-    const sign = hashString(gram, 27) % 2 === 0 ? 1 : -1;
-    vec[idx] += 0.5 * sign;
-  }
-
-  let sumSq = 0;
-  for (let i = 0; i < dimension; i++) {
-    sumSq += vec[i] * vec[i];
-  }
-  const norm = Math.sqrt(sumSq);
-  if (norm > 0) {
-    for (let i = 0; i < dimension; i++) {
-      vec[i] = Number((vec[i] / norm).toFixed(6));
-    }
-  } else {
-    vec[0] = 1.0;
-  }
-
-  return Array.from(vec);
-}
 
 export function extractHeuristicTriplets(text: string): Triplet[] {
   if (!text || typeof text !== 'string' || !text.trim()) return [];
